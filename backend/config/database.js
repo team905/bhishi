@@ -266,9 +266,11 @@ const getDb = () => {
 };
 
 // Export based on environment
-// If DATABASE_URL is set, use PostgreSQL, otherwise use SQLite
-if (process.env.DATABASE_URL) {
-  // Use PostgreSQL in production
+// Check for Vercel Postgres URL or standard DATABASE_URL
+const databaseUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL;
+
+if (databaseUrl) {
+  // Use PostgreSQL in production (Vercel or other platforms)
   console.log('Using PostgreSQL database');
   module.exports = require('./database-postgres');
 } else {

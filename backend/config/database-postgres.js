@@ -6,12 +6,15 @@ const bcrypt = require('bcryptjs');
 let pool = null;
 
 const initPostgresDatabase = async () => {
-  if (!process.env.DATABASE_URL) {
-    throw new Error('DATABASE_URL environment variable is required for PostgreSQL');
+  // Support both Vercel Postgres (POSTGRES_URL) and standard DATABASE_URL
+  const databaseUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL;
+  
+  if (!databaseUrl) {
+    throw new Error('POSTGRES_URL or DATABASE_URL environment variable is required for PostgreSQL');
   }
 
   pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: databaseUrl,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
   });
 
