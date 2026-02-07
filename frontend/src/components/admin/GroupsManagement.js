@@ -193,18 +193,6 @@ function GroupsManagement() {
     }
   };
 
-  const handleRemoveMember = async (groupId, userId) => {
-    if (!window.confirm('Are you sure you want to remove this member?')) return;
-
-    try {
-      await axios.delete(`/api/admin/bhishi-groups/${groupId}/members/${userId}`);
-      setMessage({ type: 'success', text: 'Member removed successfully' });
-      fetchGroups();
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
-    } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to remove member' });
-    }
-  };
 
   if (loading) return <div className="loading">Loading groups...</div>;
 

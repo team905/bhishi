@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { useAuth } from '../../contexts/AuthContext';
 import Navbar from '../Navbar';
 import UsersManagement from './UsersManagement';
 import GroupsManagement from './GroupsManagement';
@@ -9,7 +8,6 @@ import VideoVerifications from './VideoVerifications';
 import './AdminDashboard.css';
 
 function AdminDashboard() {
-  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('users');
 
   return (
