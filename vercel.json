@@ -22,10 +22,12 @@
       "maxDuration": 60
     }
   },
-  "crons": [
-    {
-      "path": "/api/cron/close-cycles",
-      "schedule": "*/1 * * * *"
-    }
-  ]
+  // Cron jobs removed - using API-triggered checks instead (works on free tier)
+  // If you upgrade to Pro plan, you can uncomment and use cron jobs:
+  // "crons": [
+  //   {
+  //     "path": "/api/cron/close-cycles",
+  //     "schedule": "*/1 * * * *"
+  //   }
+  // ]
 }

@@ -9,18 +9,23 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Auto-close expired cycles on API calls (works on Vercel free tier)
+// This replaces cron jobs which require Pro plan
+const checkExpiredCycles = require('./middleware/checkExpiredCycles');
+
 // Database initialization
 const db = require('./config/database');
 
-// Routes
+// Routes with auto-close expired cycles check
+// This ensures cycles are closed when users interact with the app
 app.use('/api/auth', require('./routes/auth'));
-app.use('/api/admin', require('./routes/admin'));
-app.use('/api/users', require('./routes/users'));
-app.use('/api/bhishi', require('./routes/bhishi'));
-app.use('/api/bidding', require('./routes/bidding'));
-app.use('/api/disputes', require('./routes/disputes'));
-app.use('/api/agreements', require('./routes/agreements'));
-app.use('/api/verification', require('./routes/verification'));
+app.use('/api/admin', checkExpiredCycles, require('./routes/admin'));
+app.use('/api/users', checkExpiredCycles, require('./routes/users'));
+app.use('/api/bhishi', checkExpiredCycles, require('./routes/bhishi'));
+app.use('/api/bidding', checkExpiredCycles, require('./routes/bidding'));
+app.use('/api/disputes', checkExpiredCycles, require('./routes/disputes'));
+app.use('/api/agreements', checkExpiredCycles, require('./routes/agreements'));
+app.use('/api/verification', checkExpiredCycles, require('./routes/verification'));
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -41,14 +46,17 @@ const initializeServer = async () => {
     console.log('Database initialized successfully');
     
     // Set up automatic cycle closing scheduler
-    // Note: In serverless (Vercel), we'll use Vercel Cron Jobs instead of setInterval
     if (process.env.VERCEL) {
-      // On Vercel, use cron jobs (configured in vercel.json)
-      console.log('[Scheduler] Running on Vercel - using cron jobs for cycle closure');
-      // Run once on cold start
+      // On Vercel free tier, cycle closure is triggered by API calls (see checkExpiredCycles middleware)
+      // This runs once on cold start as a backup
+      console.log('[Scheduler] Running on Vercel - using API-triggered cycle closure (free tier compatible)');
       const { manuallyCloseExpiredCycles } = require('./routes/bidding');
       manuallyCloseExpiredCycles()
-        .then(result => console.log(`[Scheduler] Initial check: ${result.message}`))
+        .then(result => {
+          if (result.closed > 0) {
+            console.log(`[Scheduler] Initial check: Closed ${result.closed} expired cycle(s)`);
+          }
+        })
         .catch(err => console.error('[Scheduler] Initial check failed:', err));
     } else {
       // Traditional server - use setInterval
