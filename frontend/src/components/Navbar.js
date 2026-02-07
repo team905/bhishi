@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
+import { getApiUrl } from '../config/api';
 
 function Navbar() {
   const { user, logout } = useAuth();
@@ -19,7 +20,7 @@ function Navbar() {
 
   const fetchUnreadCount = async () => {
     try {
-      const response = await axios.get('/api/users/notifications?unreadOnly=true');
+      const response = await axios.get(getApiUrl('/users/notifications?unreadOnly=true'));
       setUnreadCount(response.data.length);
     } catch (error) {
       // Silently fail - user might not be logged in

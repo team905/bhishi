@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { getApiUrl } from '../../config/api';
 import Modal from '../Modal';
 
 function VideoVerifications() {
@@ -18,7 +19,7 @@ function VideoVerifications() {
 
   const fetchVerifications = async () => {
     try {
-      const response = await axios.get('/api/admin/video-verifications');
+      const response = await axios.get(getApiUrl('/admin/video-verifications'));
       setVerifications(response.data);
     } catch (error) {
       setMessage({ type: 'error', text: 'Failed to fetch video verifications' });

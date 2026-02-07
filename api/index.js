@@ -1,6 +1,20 @@
 // Vercel serverless function - Main API entry point
 // This wraps the Express app for Vercel's serverless environment
 
+// Set VERCEL environment variable for backend/server.js
+process.env.VERCEL = '1';
+
+const express = require('express');
+const cors = require('cors');
+require('dotenv').config();
+
+const app = express();
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// Database initialization
 const db = require('../backend/config/database');
 let dbInitialized = false;
 let initPromise = null;
@@ -12,9 +26,9 @@ const initDb = async () => {
         try {
           await db.initDatabase();
           dbInitialized = true;
-          console.log('Database initialized for serverless function');
+          console.log('[Vercel] Database initialized for serverless function');
         } catch (error) {
-          console.error('Database initialization error:', error);
+          console.error('[Vercel] Database initialization error:', error);
           throw error;
         }
       })();
@@ -23,18 +37,45 @@ const initDb = async () => {
   }
 };
 
-// Import Express app
-const app = require('../backend/server');
-
-// Initialize database before handling requests (only once, even with concurrent requests)
+// Initialize database before handling requests
 app.use(async (req, res, next) => {
   try {
     await initDb();
     next();
   } catch (error) {
-    console.error('Database init error in middleware:', error);
-    res.status(500).json({ error: 'Database initialization failed' });
+    console.error('[Vercel] Database init error in middleware:', error);
+    return res.status(500).json({ 
+      error: 'Database initialization failed',
+      details: error.message 
+    });
   }
+});
+
+// Auto-close expired cycles middleware
+const checkExpiredCycles = require('../backend/middleware/checkExpiredCycles');
+
+// Routes - Note: Vercel rewrites /api/* to this function, so routes should NOT include /api prefix
+app.use('/auth', require('../backend/routes/auth'));
+app.use('/admin', checkExpiredCycles, require('../backend/routes/admin'));
+app.use('/users', checkExpiredCycles, require('../backend/routes/users'));
+app.use('/bhishi', checkExpiredCycles, require('../backend/routes/bhishi'));
+app.use('/bidding', checkExpiredCycles, require('../backend/routes/bidding'));
+app.use('/disputes', checkExpiredCycles, require('../backend/routes/disputes'));
+app.use('/agreements', checkExpiredCycles, require('../backend/routes/agreements'));
+app.use('/verification', checkExpiredCycles, require('../backend/routes/verification'));
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', message: 'Bhishi Management System API' });
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('[Vercel] Error:', err);
+  res.status(err.status || 500).json({
+    error: err.message || 'Internal server error',
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+  });
 });
 
 // Export for Vercel

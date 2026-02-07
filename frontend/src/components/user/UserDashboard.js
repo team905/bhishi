@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import axios from 'axios';
+import { getApiUrl } from '../../config/api';
 import Navbar from '../Navbar';
 import BiddingSection from './BiddingSection';
 import GroupsSection from './GroupsSection';
@@ -41,7 +42,7 @@ function UserDashboard() {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const response = await axios.get('/api/users/dashboard', {
+      const response = await axios.get(getApiUrl('/users/dashboard'), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }

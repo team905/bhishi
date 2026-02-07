@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { getApiUrl } from '../../config/api';
 
 function MonthlyBiddingHistory({ groupId }) {
   const [groupDetails, setGroupDetails] = useState(null);
@@ -14,7 +15,7 @@ function MonthlyBiddingHistory({ groupId }) {
 
   const fetchGroupDetails = async () => {
     try {
-      const response = await axios.get(`/api/bhishi/groups/${groupId}`);
+      const response = await axios.get(getApiUrl(`/bhishi/groups/${groupId}`));
       setGroupDetails(response.data);
     } catch (error) {
       console.error('Failed to fetch group details:', error);
@@ -112,7 +113,7 @@ function MonthlyCycleCard({ month, cycles, groupId, members, contributionAmount 
     const statuses = {};
     for (const cycle of cycles) {
       try {
-        const response = await axios.get(`/api/bhishi/groups/${groupId}/cycles/${cycle.id}/payments`);
+        const response = await axios.get(getApiUrl(`/bhishi/groups/${groupId}/cycles/${cycle.id}/payments`));
         statuses[cycle.id] = response.data;
       } catch (error) {
         console.error(`Failed to fetch payments for cycle ${cycle.id}:`, error);

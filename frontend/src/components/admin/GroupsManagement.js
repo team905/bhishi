@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { getApiUrl } from '../../config/api';
 import Modal from '../Modal';
 
 function GroupsManagement() {
@@ -32,7 +33,7 @@ function GroupsManagement() {
 
   const fetchGroups = async () => {
     try {
-      const response = await axios.get('/api/admin/bhishi-groups');
+      const response = await axios.get(getApiUrl('/admin/bhishi-groups'));
       setGroups(response.data);
     } catch (error) {
       setMessage({ type: 'error', text: 'Failed to fetch groups' });
@@ -43,7 +44,7 @@ function GroupsManagement() {
 
   const fetchUsers = async () => {
     try {
-      const response = await axios.get('/api/admin/users');
+      const response = await axios.get(getApiUrl('/admin/users'));
       setUsers(response.data.filter(u => u.role === 'user' && u.is_active));
     } catch (error) {
       console.error('Failed to fetch users');
@@ -82,7 +83,7 @@ function GroupsManagement() {
     }
 
     try {
-      await axios.delete(`/api/admin/bhishi-groups/${group.id}`);
+      await axios.delete(getApiUrl(`/admin/bhishi-groups/${group.id}`));
       setMessage({ type: 'success', text: 'Group deleted successfully' });
       fetchGroups();
       setTimeout(() => setMessage({ type: '', text: '' }), 3000);
@@ -96,7 +97,7 @@ function GroupsManagement() {
     setMessage({ type: '', text: '' });
 
     try {
-      await axios.put(`/api/admin/bhishi-groups/${editingGroup.id}`, {
+      await axios.put(getApiUrl(`/admin/bhishi-groups/${editingGroup.id}`), {
         name: formData.name,
         description: formData.description,
         contributionAmount: parseFloat(formData.contributionAmount),
@@ -120,7 +121,7 @@ function GroupsManagement() {
     setMessage({ type: '', text: '' });
 
     try {
-      await axios.post('/api/admin/bhishi-groups', {
+      await axios.post(getApiUrl('/admin/bhishi-groups'), {
         name: formData.name,
         description: formData.description,
         contributionAmount: parseFloat(formData.contributionAmount),
@@ -144,7 +145,7 @@ function GroupsManagement() {
     
     // Fetch current members of the group to filter them out
     try {
-      const response = await axios.get(`/api/bhishi/groups/${group.id}`);
+      const response = await axios.get(getApiUrl(`/bhishi/groups/${group.id}`));
       const currentMemberIds = (response.data.members || []).map(m => m.id);
       // Filter out users who are already members
       const available = users.filter(u => !currentMemberIds.includes(u.id));
@@ -162,7 +163,7 @@ function GroupsManagement() {
     setShowViewMembersModal(true);
     
     try {
-      const response = await axios.get(`/api/bhishi/groups/${group.id}`);
+      const response = await axios.get(getApiUrl(`/bhishi/groups/${group.id}`));
       setGroupMembers(response.data.members || []);
     } catch (error) {
       setMessage({ type: 'error', text: error.response?.data?.error || 'Failed to fetch members' });
@@ -178,7 +179,7 @@ function GroupsManagement() {
     const userId = form.userId.value;
 
     try {
-      await axios.post(`/api/admin/bhishi-groups/${selectedGroup.id}/members`, {
+      await axios.post(getApiUrl(`/admin/bhishi-groups/${selectedGroup.id}/members`), {
         userId: parseInt(userId)
       });
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { getApiUrl } from '../../config/api';
 import Modal from '../Modal';
 
 function BiddingSection({ cycles, myBids, onBidPlaced }) {
@@ -18,7 +19,7 @@ function BiddingSection({ cycles, myBids, onBidPlaced }) {
 
   const fetchCycles = async () => {
     try {
-      const response = await axios.get('/api/bidding/cycles');
+      const response = await axios.get(getApiUrl('/bidding/cycles'));
       setBiddingCycles(response.data);
     } catch (error) {
       setMessage({ type: 'error', text: 'Failed to fetch bidding cycles' });
@@ -44,7 +45,7 @@ function BiddingSection({ cycles, myBids, onBidPlaced }) {
     setMessage({ type: '', text: '' });
 
     try {
-      await axios.post('/api/bidding/bid', {
+      await axios.post(getApiUrl('/bidding/bid'), {
         cycleId: selectedCycle.id,
         bidAmount: parseFloat(bidAmount)
       });
@@ -62,7 +63,7 @@ function BiddingSection({ cycles, myBids, onBidPlaced }) {
   const handleViewBids = async (cycle) => {
     setSelectedCycle(cycle);
     try {
-      const response = await axios.get(`/api/bidding/cycles/${cycle.id}/bids`);
+      const response = await axios.get(getApiUrl(`/bidding/cycles/${cycle.id}/bids`));
       setSelectedCycle({ ...cycle, bids: response.data });
     } catch (error) {
       setMessage({ type: 'error', text: 'Failed to fetch bids' });

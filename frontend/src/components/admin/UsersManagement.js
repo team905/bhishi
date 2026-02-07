@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { getApiUrl } from '../../config/api';
 import Modal from '../Modal';
 
 function UsersManagement() {
@@ -25,7 +26,7 @@ function UsersManagement() {
 
   const fetchUsers = async () => {
     try {
-      const response = await axios.get('/api/admin/users');
+      const response = await axios.get(getApiUrl('/admin/users'));
       setUsers(response.data);
     } catch (error) {
       setMessage({ type: 'error', text: 'Failed to fetch users' });
@@ -64,7 +65,7 @@ function UsersManagement() {
 
     try {
       if (editingUser) {
-        await axios.put(`/api/admin/users/${editingUser.id}`, {
+        await axios.put(getApiUrl(`/admin/users/${editingUser.id}`), {
           email: formData.email,
           fullName: formData.fullName,
           phone: formData.phone,
@@ -72,14 +73,14 @@ function UsersManagement() {
         });
 
         if (formData.password) {
-          await axios.post(`/api/admin/users/${editingUser.id}/reset-password`, {
+          await axios.post(getApiUrl(`/admin/users/${editingUser.id}/reset-password`), {
             newPassword: formData.password
           });
         }
 
         setMessage({ type: 'success', text: 'User updated successfully' });
       } else {
-        await axios.post('/api/admin/users', formData);
+        await axios.post(getApiUrl('/admin/users'), formData);
         setMessage({ type: 'success', text: 'User created successfully' });
       }
 
@@ -107,7 +108,7 @@ function UsersManagement() {
 
   const toggleUserStatus = async (user) => {
     try {
-      await axios.put(`/api/admin/users/${user.id}`, {
+      await axios.put(getApiUrl(`/admin/users/${user.id}`), {
         isActive: !user.is_active
       });
       fetchUsers();
@@ -132,7 +133,7 @@ function UsersManagement() {
     }
 
     try {
-      await axios.post(`/api/admin/users/${selectedUser.id}/reset-password`, {
+      await axios.post(getApiUrl(`/admin/users/${selectedUser.id}/reset-password`), {
         newPassword: resetPassword
       });
       setMessage({ type: 'success', text: 'Password reset successfully. User will be required to change password on next login.' });

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { getApiUrl } from '../../config/api';
 import './WinnerVerification.css';
 
 function WinnerVerification() {
@@ -24,8 +25,8 @@ function WinnerVerification() {
   const fetchData = async () => {
     try {
       const [agreementRes, verificationRes] = await Promise.all([
-        axios.get(`/api/agreements/cycles/${cycleId}`),
-        axios.get(`/api/verification/cycles/${cycleId}`)
+        axios.get(getApiUrl(`/agreements/cycles/${cycleId}`)),
+        axios.get(getApiUrl(`/verification/cycles/${cycleId}`))
       ]);
 
       setCycle(agreementRes.data.cycle);
@@ -54,7 +55,7 @@ function WinnerVerification() {
     }
 
     try {
-      await axios.post('/api/agreements/sign', {
+      await axios.post(getApiUrl('/agreements/sign'), {
         cycleId: parseInt(cycleId),
         signatureData: signature
       });
@@ -80,7 +81,7 @@ function WinnerVerification() {
     }
 
     try {
-      await axios.post('/api/verification/upload', {
+      await axios.post(getApiUrl('/verification/upload'), {
         cycleId: parseInt(cycleId),
         videoUrl: videoUrl.trim()
       });

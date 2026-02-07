@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { getApiUrl } from '../../config/api';
 
 function NotificationsSection() {
   const [notifications, setNotifications] = useState([]);
@@ -17,8 +18,8 @@ function NotificationsSection() {
   const fetchNotifications = async () => {
     try {
       const url = filter === 'unread' 
-        ? '/api/users/notifications?unreadOnly=true'
-        : '/api/users/notifications';
+        ? getApiUrl('/users/notifications?unreadOnly=true')
+        : getApiUrl('/users/notifications');
       const response = await axios.get(url);
       setNotifications(response.data);
     } catch (error) {
@@ -30,7 +31,7 @@ function NotificationsSection() {
 
   const markAsRead = async (notificationId) => {
     try {
-      await axios.put(`/api/users/notifications/${notificationId}/read`);
+      await axios.put(getApiUrl(`/users/notifications/${notificationId}/read`));
       // Update local state
       setNotifications(notifications.map(n => 
         n.id === notificationId ? { ...n, is_read: 1 } : n
@@ -45,7 +46,7 @@ function NotificationsSection() {
       const unreadNotifications = notifications.filter(n => !n.is_read);
       await Promise.all(
         unreadNotifications.map(n => 
-          axios.put(`/api/users/notifications/${n.id}/read`)
+          axios.put(getApiUrl(`/users/notifications/${n.id}/read`))
         )
       );
       setNotifications(notifications.map(n => ({ ...n, is_read: 1 })));

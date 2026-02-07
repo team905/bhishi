@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { getApiUrl } from '../../config/api';
 import Modal from '../Modal';
 
 function BiddingManagement() {
@@ -24,7 +25,7 @@ function BiddingManagement() {
 
   const fetchCycles = async () => {
     try {
-      const response = await axios.get('/api/admin/bidding-cycles');
+      const response = await axios.get(getApiUrl('/admin/bidding-cycles'));
       setCycles(response.data);
     } catch (error) {
       setMessage({ type: 'error', text: 'Failed to fetch bidding cycles' });
@@ -35,7 +36,7 @@ function BiddingManagement() {
 
   const fetchGroups = async () => {
     try {
-      const response = await axios.get('/api/admin/bhishi-groups');
+      const response = await axios.get(getApiUrl('/admin/bhishi-groups'));
       setGroups(response.data.filter(g => g.status === 'active'));
     } catch (error) {
       console.error('Failed to fetch groups');
@@ -57,7 +58,7 @@ function BiddingManagement() {
     setMessage({ type: '', text: '' });
 
     try {
-      await axios.post('/api/admin/bidding-cycles', {
+      await axios.post(getApiUrl('/admin/bidding-cycles'), {
         groupId: parseInt(formData.groupId),
         biddingStartDate: formData.biddingStartDate,
         biddingEndDate: formData.biddingEndDate

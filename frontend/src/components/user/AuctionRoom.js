@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import axios from 'axios';
+import { getApiUrl } from '../../config/api';
 import './AuctionRoom.css';
 
 function AuctionRoom() {
@@ -47,7 +48,7 @@ function AuctionRoom() {
 
   const fetchCycleData = async () => {
     try {
-      const response = await axios.get(`/api/bidding/cycles`);
+      const response = await axios.get(getApiUrl('/bidding/cycles'));
       const cycleData = response.data.find(c => c.id === parseInt(cycleId));
       
       if (!cycleData) {
@@ -71,7 +72,7 @@ function AuctionRoom() {
 
   const fetchBids = async () => {
     try {
-      const response = await axios.get(`/api/bidding/cycles/${cycleId}/bids`);
+      const response = await axios.get(getApiUrl(`/bidding/cycles/${cycleId}/bids`));
       const sortedBids = response.data.sort((a, b) => {
         if (a.bid_amount !== b.bid_amount) {
           return a.bid_amount - b.bid_amount; // Sort by amount (lowest first)
@@ -125,7 +126,7 @@ function AuctionRoom() {
     }
 
     try {
-      await axios.post('/api/bidding/bid', {
+      await axios.post(getApiUrl('/bidding/bid'), {
         cycleId: parseInt(cycleId),
         bidAmount: parseFloat(bidAmount)
       });

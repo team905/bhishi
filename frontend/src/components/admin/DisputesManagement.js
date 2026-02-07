@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { getApiUrl } from '../../config/api';
 import Modal from '../Modal';
 
 function DisputesManagement() {
@@ -18,7 +19,7 @@ function DisputesManagement() {
 
   const fetchDisputes = async () => {
     try {
-      const response = await axios.get('/api/admin/disputes');
+      const response = await axios.get(getApiUrl('/admin/disputes'));
       setDisputes(response.data);
     } catch (error) {
       setMessage({ type: 'error', text: 'Failed to fetch disputes' });
