@@ -7,7 +7,6 @@ import './WinnerVerification.css';
 function WinnerVerification() {
   const { cycleId } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
   const [cycle, setCycle] = useState(null);
   const [agreement, setAgreement] = useState(null);
   const [verification, setVerification] = useState(null);
@@ -20,6 +19,7 @@ function WinnerVerification() {
 
   useEffect(() => {
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cycleId]);
 
   const fetchData = async () => {

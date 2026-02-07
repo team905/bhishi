@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import axios from 'axios';
@@ -36,6 +36,7 @@ function AuctionRoom() {
       clearInterval(pollIntervalRef.current);
       clearInterval(timerInterval);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cycleId]);
 
   useEffect(() => {
@@ -162,9 +163,6 @@ function AuctionRoom() {
   };
 
   // User bids the amount they want to receive (no calculation needed)
-  const getPayoutAmount = (bidAmt) => {
-    return bidAmt; // Bid amount = payout amount
-  };
 
   if (loading) {
     return <div className="auction-room-loading">Loading auction room...</div>;

@@ -9,6 +9,7 @@ function MonthlyBiddingHistory({ groupId }) {
     if (groupId) {
       fetchGroupDetails();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId]);
 
   const fetchGroupDetails = async () => {
@@ -43,16 +44,6 @@ function MonthlyBiddingHistory({ groupId }) {
     return acc;
   }, {});
 
-  // Get payment status for each member for each cycle
-  const getPaymentStatus = async (cycleId) => {
-    try {
-      const response = await axios.get(`/api/bhishi/groups/${groupId}/cycles/${cycleId}/payments`);
-      return response.data;
-    } catch (error) {
-      console.error('Failed to fetch payment status:', error);
-      return [];
-    }
-  };
 
   return (
     <div>
@@ -114,6 +105,7 @@ function MonthlyCycleCard({ month, cycles, groupId, members, contributionAmount 
 
   useEffect(() => {
     fetchAllPaymentStatuses();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cycles]);
 
   const fetchAllPaymentStatuses = async () => {
