@@ -1,8 +1,10 @@
 // Vercel serverless function - Main API entry point
-console.log('[Vercel] Function starting...');
-
-// Set VERCEL environment variable
+// CRITICAL: Set VERCEL flag BEFORE any requires that might load database.js
 process.env.VERCEL = '1';
+
+console.log('[Vercel] Function starting...');
+console.log('[Vercel] DATABASE_URL:', process.env.DATABASE_URL ? 'SET' : 'NOT SET');
+console.log('[Vercel] POSTGRES_URL:', process.env.POSTGRES_URL ? 'SET' : 'NOT SET');
 
 const express = require('express');
 const cors = require('cors');
