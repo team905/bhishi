@@ -52,13 +52,30 @@ const initDb = async () => {
 app.use(async (req, res, next) => {
   try {
     await initDb();
+    // Verify database is accessible
+    const { getDb } = require('../backend/config/database');
+    try {
+      const testDb = getDb();
+      if (!testDb) {
+        throw new Error('Database object is null');
+      }
+    } catch (dbError) {
+      console.error('[Vercel] Database verification failed:', dbError);
+      return res.status(500).json({ 
+        error: 'Database not accessible',
+        message: dbError.message,
+        hint: 'Database initialized but getDb() failed'
+      });
+    }
     next();
   } catch (error) {
     console.error('[Vercel] Database init error in middleware:', error.message);
+    console.error('[Vercel] Full error:', error);
     return res.status(500).json({ 
       error: 'Database initialization failed',
       message: error.message,
-      hint: 'Please ensure DATABASE_URL is set in your Vercel environment variables'
+      hint: 'Please ensure DATABASE_URL is set in your Vercel environment variables',
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
@@ -67,6 +84,7 @@ app.use(async (req, res, next) => {
 const checkExpiredCycles = require('../backend/middleware/checkExpiredCycles');
 
 // Routes - Note: Vercel rewrites /api/* to this function, so routes should NOT include /api prefix
+// Load routes after database is initialized
 app.use('/auth', require('../backend/routes/auth'));
 app.use('/admin', checkExpiredCycles, require('../backend/routes/admin'));
 app.use('/users', checkExpiredCycles, require('../backend/routes/users'));

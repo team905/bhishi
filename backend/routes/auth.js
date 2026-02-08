@@ -19,12 +19,26 @@ router.post('/login', [
     }
 
     const { username, password } = req.body;
-    const db = getDb();
+    
+    let db;
+    try {
+      db = getDb();
+    } catch (dbError) {
+      console.error('Database not initialized:', dbError);
+      return res.status(500).json({ 
+        error: 'Database not available',
+        message: dbError.message 
+      });
+    }
 
     db.get('SELECT * FROM users WHERE username = ? AND is_active = 1', [username], async (err, user) => {
       if (err) {
         console.error('Database error during login:', err);
-        return res.status(500).json({ error: 'Database error' });
+        console.error('Database error details:', err.message, err.stack);
+        return res.status(500).json({ 
+          error: 'Database error',
+          message: err.message 
+        });
       }
 
       if (!user) {

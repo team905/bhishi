@@ -249,7 +249,8 @@ const convertQuery = (query, params = []) => {
 // Wrapper to match SQLite callback-based API
 const getDb = () => {
   if (!pool) {
-    throw new Error('Database not initialized');
+    console.error('[getDb] Pool is null. Database may not be initialized.');
+    throw new Error('Database not initialized. Please ensure initDatabase() was called successfully.');
   }
   
   return {
