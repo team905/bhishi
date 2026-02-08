@@ -1,7 +1,7 @@
 // Vercel serverless function - Main API entry point
 // This wraps the Express app for Vercel's serverless environment
 
-// Set VERCEL environment variable for backend/server.js
+// Set VERCEL environment variable
 process.env.VERCEL = '1';
 
 const express = require('express');
@@ -15,7 +15,7 @@ app.use(cors());
 app.use(express.json());
 
 // Database initialization
-const db = require('../backend/config/database');
+let db = null;
 let dbInitialized = false;
 let initPromise = null;
 
@@ -24,11 +24,22 @@ const initDb = async () => {
     if (!initPromise) {
       initPromise = (async () => {
         try {
+          // Check if DATABASE_URL is set
+          const databaseUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL;
+          if (!databaseUrl) {
+            throw new Error('DATABASE_URL environment variable is not set. Please configure your database in Vercel project settings.');
+          }
+
+          // Load database module
+          db = require('../backend/config/database');
+          
+          // Initialize database
           await db.initDatabase();
           dbInitialized = true;
-          console.log('[Vercel] Database initialized for serverless function');
+          console.log('[Vercel] Database initialized successfully');
         } catch (error) {
           console.error('[Vercel] Database initialization error:', error);
+          console.error('[Vercel] Error stack:', error.stack);
           throw error;
         }
       })();
@@ -43,10 +54,11 @@ app.use(async (req, res, next) => {
     await initDb();
     next();
   } catch (error) {
-    console.error('[Vercel] Database init error in middleware:', error);
+    console.error('[Vercel] Database init error in middleware:', error.message);
     return res.status(500).json({ 
       error: 'Database initialization failed',
-      details: error.message 
+      message: error.message,
+      hint: 'Please ensure DATABASE_URL is set in your Vercel environment variables'
     });
   }
 });

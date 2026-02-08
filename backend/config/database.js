@@ -267,6 +267,7 @@ const getDb = () => {
 
 // Export based on environment
 // Check for Vercel Postgres URL or standard DATABASE_URL
+// Check for database URL - prioritize POSTGRES_URL (Vercel) then DATABASE_URL
 const databaseUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL;
 
 if (databaseUrl) {
@@ -274,10 +275,24 @@ if (databaseUrl) {
   console.log('Using PostgreSQL database');
   module.exports = require('./database-postgres');
 } else {
-  // Use SQLite in development
-  console.log('Using SQLite database');
-  module.exports = {
-    initDatabase,
-    getDb
-  };
+  // Use SQLite in development (only if not on Vercel)
+  if (process.env.VERCEL) {
+    // On Vercel, we must use PostgreSQL
+    console.error('ERROR: DATABASE_URL is required on Vercel. Please set DATABASE_URL in your Vercel environment variables.');
+    module.exports = {
+      initDatabase: async () => {
+        throw new Error('DATABASE_URL environment variable is required. Please configure your database in Vercel project settings.');
+      },
+      getDb: () => {
+        throw new Error('Database not initialized. DATABASE_URL is required.');
+      }
+    };
+  } else {
+    // Use SQLite in local development
+    console.log('Using SQLite database (local development)');
+    module.exports = {
+      initDatabase,
+      getDb
+    };
+  }
 }
