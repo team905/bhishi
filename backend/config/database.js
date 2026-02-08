@@ -1,12 +1,33 @@
-const sqlite3 = require('sqlite3').verbose();
+// SQLite database configuration (for local development only)
+// This file is NOT used when DATABASE_URL or POSTGRES_URL is set
+// On Vercel, database-postgres.js is used instead
+
 const bcrypt = require('bcryptjs');
 const path = require('path');
+
+// Only load sqlite3 if we're actually using SQLite (not on Vercel/PostgreSQL)
+// Check environment FIRST before requiring sqlite3
+const databaseUrlCheck = process.env.POSTGRES_URL || process.env.DATABASE_URL;
+
+let sqlite3 = null;
+if (!databaseUrlCheck && !process.env.VERCEL) {
+  // Only load sqlite3 for local development
+  try {
+    sqlite3 = require('sqlite3').verbose();
+  } catch (err) {
+    console.error('Failed to load sqlite3. This is expected on Vercel when using PostgreSQL.');
+    // Don't throw - let the export logic handle it
+  }
+}
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'bhishi.db');
 
 let db = null;
 
 const initDatabase = async () => {
+  if (!sqlite3) {
+    throw new Error('SQLite3 not available. This function should only be called in local development.');
+  }
   return new Promise((resolve, reject) => {
     db = new sqlite3.Database(DB_PATH, (err) => {
       if (err) {
@@ -69,13 +90,13 @@ const createTables = async () => {
       cycle_number INTEGER NOT NULL,
       bidding_start_date DATETIME NOT NULL,
       bidding_end_date DATETIME NOT NULL,
+      total_pool_amount REAL NOT NULL,
       status TEXT DEFAULT 'open',
       winner_user_id INTEGER,
       winning_bid_amount REAL,
-      total_pool_amount REAL,
-      admin_approved INTEGER DEFAULT 0,
-      payout_date DATETIME,
       is_random_winner INTEGER DEFAULT 0,
+      payout_date DATETIME,
+      admin_approved INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (group_id) REFERENCES bhishi_groups(id),
       FOREIGN KEY (winner_user_id) REFERENCES users(id),
@@ -109,15 +130,42 @@ const createTables = async () => {
       UNIQUE(cycle_id, user_id)
     )`,
 
+    // Agreements table
+    `CREATE TABLE IF NOT EXISTS agreements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cycle_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      signature_data TEXT NOT NULL,
+      signed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (cycle_id) REFERENCES bidding_cycles(id),
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      UNIQUE(cycle_id, user_id)
+    )`,
+
+    // Video verifications table
+    `CREATE TABLE IF NOT EXISTS video_verifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cycle_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      video_url TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      verified_by INTEGER,
+      verified_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (cycle_id) REFERENCES bidding_cycles(id),
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (verified_by) REFERENCES users(id),
+      UNIQUE(cycle_id, user_id)
+    )`,
+
     // Disputes table
     `CREATE TABLE IF NOT EXISTS disputes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      cycle_id INTEGER,
+      cycle_id INTEGER NOT NULL,
       user_id INTEGER NOT NULL,
-      title TEXT NOT NULL,
-      description TEXT NOT NULL,
-      status TEXT DEFAULT 'open',
+      dispute_text TEXT NOT NULL,
       admin_response TEXT,
+      status TEXT DEFAULT 'open',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       resolved_at DATETIME,
       FOREIGN KEY (cycle_id) REFERENCES bidding_cycles(id),
@@ -129,46 +177,13 @@ const createTables = async () => {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
       cycle_id INTEGER,
-      type TEXT NOT NULL,
-      title TEXT NOT NULL,
+      title TEXT,
       message TEXT NOT NULL,
+      type TEXT DEFAULT 'info',
       is_read INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id),
       FOREIGN KEY (cycle_id) REFERENCES bidding_cycles(id)
-    )`,
-
-    // Agreements table
-    `CREATE TABLE IF NOT EXISTS agreements (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      cycle_id INTEGER NOT NULL,
-      user_id INTEGER NOT NULL,
-      agreement_text TEXT NOT NULL,
-      signed_at DATETIME,
-      signature_data TEXT,
-      ip_address TEXT,
-      user_agent TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (cycle_id) REFERENCES bidding_cycles(id),
-      FOREIGN KEY (user_id) REFERENCES users(id),
-      UNIQUE(cycle_id, user_id)
-    )`,
-
-    // Video verifications table
-    `CREATE TABLE IF NOT EXISTS video_verifications (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      cycle_id INTEGER NOT NULL,
-      user_id INTEGER NOT NULL,
-      video_url TEXT,
-      verification_status TEXT DEFAULT 'pending',
-      verified_at DATETIME,
-      verified_by INTEGER,
-      notes TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (cycle_id) REFERENCES bidding_cycles(id),
-      FOREIGN KEY (user_id) REFERENCES users(id),
-      FOREIGN KEY (verified_by) REFERENCES users(id),
-      UNIQUE(cycle_id, user_id)
     )`,
 
     // Profit distributions table
@@ -231,6 +246,28 @@ const createTables = async () => {
     });
   });
 
+  // Add password_changed to users if it doesn't exist
+  await new Promise((resolve, reject) => {
+    db.run(`
+      ALTER TABLE users 
+      ADD COLUMN password_changed INTEGER DEFAULT 0
+    `, (err) => {
+      // Ignore error if column already exists
+      resolve();
+    });
+  });
+
+  // Add title to notifications if it doesn't exist
+  await new Promise((resolve, reject) => {
+    db.run(`
+      ALTER TABLE notifications 
+      ADD COLUMN title TEXT
+    `, (err) => {
+      // Ignore error if column already exists
+      resolve();
+    });
+  });
+
   // Create default admin user if not exists
   await createDefaultAdmin();
 };
@@ -265,34 +302,19 @@ const getDb = () => {
   return db;
 };
 
-// Export based on environment
-// Check for Vercel Postgres URL or standard DATABASE_URL
-// Check for database URL - prioritize POSTGRES_URL (Vercel) then DATABASE_URL
+// Export logic - route to PostgreSQL if DATABASE_URL is set
+// Check environment FIRST before exporting
 const databaseUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL;
 
-if (databaseUrl) {
+if (databaseUrl || process.env.VERCEL) {
   // Use PostgreSQL in production (Vercel or other platforms)
-  console.log('Using PostgreSQL database');
+  console.log('[database.js] Routing to PostgreSQL (database-postgres.js)');
   module.exports = require('./database-postgres');
 } else {
-  // Use SQLite in development (only if not on Vercel)
-  if (process.env.VERCEL) {
-    // On Vercel, we must use PostgreSQL
-    console.error('ERROR: DATABASE_URL is required on Vercel. Please set DATABASE_URL in your Vercel environment variables.');
-    module.exports = {
-      initDatabase: async () => {
-        throw new Error('DATABASE_URL environment variable is required. Please configure your database in Vercel project settings.');
-      },
-      getDb: () => {
-        throw new Error('Database not initialized. DATABASE_URL is required.');
-      }
-    };
-  } else {
-    // Use SQLite in local development
-    console.log('Using SQLite database (local development)');
-    module.exports = {
-      initDatabase,
-      getDb
-    };
-  }
+  // Use SQLite in local development only
+  console.log('[database.js] Using SQLite for local development');
+  module.exports = {
+    initDatabase,
+    getDb
+  };
 }
