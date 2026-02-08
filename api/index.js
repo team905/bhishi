@@ -4,9 +4,31 @@
 // Set VERCEL environment variable
 process.env.VERCEL = '1';
 
-const express = require('express');
-const cors = require('cors');
-require('dotenv').config();
+// Log startup
+console.log('[Vercel] Starting serverless function...');
+console.log('[Vercel] NODE_PATH:', process.env.NODE_PATH);
+console.log('[Vercel] __dirname:', __dirname);
+
+// Add error handling for missing modules
+let express, cors;
+try {
+  express = require('express');
+  cors = require('cors');
+  require('dotenv').config();
+  console.log('[Vercel] Core dependencies loaded successfully');
+} catch (error) {
+  console.error('[Vercel] Failed to load core dependencies:', error);
+  console.error('[Vercel] Error details:', error.message, error.stack);
+  // Export a simple error handler
+  module.exports = (req, res) => {
+    res.status(500).json({
+      error: 'Server configuration error',
+      message: error.message,
+      hint: 'Dependencies may not be installed. Check Vercel build logs.'
+    });
+  };
+  throw error;
+}
 
 const app = express();
 
@@ -81,7 +103,14 @@ app.use(async (req, res, next) => {
 });
 
 // Auto-close expired cycles middleware
-const checkExpiredCycles = require('../backend/middleware/checkExpiredCycles');
+let checkExpiredCycles;
+try {
+  checkExpiredCycles = require('../backend/middleware/checkExpiredCycles');
+} catch (error) {
+  console.error('[Vercel] Failed to load checkExpiredCycles middleware:', error);
+  // Create a no-op middleware if it fails to load
+  checkExpiredCycles = (req, res, next) => next();
+}
 
 // Routes - Note: Vercel rewrites /api/* to this function, so routes should NOT include /api prefix
 // Load routes after database is initialized
