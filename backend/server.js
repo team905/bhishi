@@ -9,8 +9,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Auto-close expired cycles on API calls (works on Vercel free tier)
-// This replaces cron jobs which require Pro plan
+// Auto-close expired cycles on API calls
 const checkExpiredCycles = require('./middleware/checkExpiredCycles');
 
 // Database initialization
@@ -46,105 +45,42 @@ const initializeServer = async () => {
     console.log('Database initialized successfully');
     
     // Set up automatic cycle closing scheduler
-    if (process.env.VERCEL) {
-      // On Vercel free tier, cycle closure is triggered by API calls (see checkExpiredCycles middleware)
-      // This runs once on cold start as a backup
-      console.log('[Scheduler] Running on Vercel - using API-triggered cycle closure (free tier compatible)');
-      const { manuallyCloseExpiredCycles } = require('./routes/bidding');
-      manuallyCloseExpiredCycles()
-        .then(result => {
-          if (result.closed > 0) {
-            console.log(`[Scheduler] Initial check: Closed ${result.closed} expired cycle(s)`);
-          }
-        })
-        .catch(err => console.error('[Scheduler] Initial check failed:', err));
-    } else {
-      // Traditional server - use setInterval
-      const { closeBiddingCycle } = require('./routes/bidding');
-      const { getDb } = require('./config/database');
-      
-      const checkAndCloseExpiredCycles = () => {
-        const db = getDb();
-        const now = new Date();
-        const nowISO = now.toISOString();
-        
-        console.log(`[Scheduler] Checking for expired cycles at ${nowISO}...`);
-        
-        db.all(`
-          SELECT id, group_id, bidding_end_date, status
-          FROM bidding_cycles
-          WHERE status = 'open'
-        `, [], (err, allOpenCycles) => {
-          if (err) {
-            console.error('[Scheduler] Error fetching open cycles:', err);
-            return;
-          }
-
-          if (allOpenCycles.length === 0) {
-            return;
-          }
-
-          const cyclesToClose = allOpenCycles.filter(cycle => {
-            const endDate = new Date(cycle.bidding_end_date);
-            return endDate <= now;
-          });
-
-          if (cyclesToClose.length === 0) {
-            return;
-          }
-
-          console.log(`[Scheduler] Found ${cyclesToClose.length} expired cycle(s) to close.`);
-
-          cyclesToClose.forEach((cycle) => {
-            closeBiddingCycle(cycle.id)
-              .then((result) => {
-                console.log(`[Scheduler] ✓ Successfully closed cycle ${cycle.id}`);
-              })
-              .catch((closeError) => {
-                console.error(`[Scheduler] ✗ Failed to close cycle ${cycle.id}:`, closeError.message);
-              });
-          });
-        });
-      };
-      
-      checkAndCloseExpiredCycles();
-      setTimeout(checkAndCloseExpiredCycles, 2000);
-      setInterval(checkAndCloseExpiredCycles, 10000);
-      console.log('[Scheduler] Automatic cycle closing scheduler started');
-    }
+    // Use the existing manuallyCloseExpiredCycles function which works with both SQLite and PostgreSQL
+    const { manuallyCloseExpiredCycles } = require('./routes/bidding');
+    
+    const checkAndCloseExpiredCycles = async () => {
+      try {
+        const result = await manuallyCloseExpiredCycles();
+        if (result.closed > 0) {
+          console.log(`[Scheduler] Closed ${result.closed} expired cycle(s)`);
+        }
+      } catch (error) {
+        console.error('[Scheduler] Error checking expired cycles:', error.message);
+      }
+    };
+    
+    // Run immediately, then every 10 seconds
+    checkAndCloseExpiredCycles();
+    setTimeout(checkAndCloseExpiredCycles, 2000);
+    setInterval(checkAndCloseExpiredCycles, 10000);
+    console.log('[Scheduler] Automatic cycle closing scheduler started (checks every 10 seconds)');
   } catch (err) {
     console.error('Failed to initialize database:', err);
     throw err;
   }
 };
 
-// For Vercel serverless, export the handler
-if (process.env.VERCEL) {
-  // Initialize on first request (cold start)
-  let initPromise = null;
-  
-  app.use(async (req, res, next) => {
-    if (!serverInitialized) {
-      if (!initPromise) {
-        initPromise = initializeServer();
-      }
-      await initPromise;
-    }
-    next();
+// Initialize and start server
+initializeServer().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`Database: ${process.env.DATABASE_URL ? 'PostgreSQL (production)' : 'SQLite (local)'}`);
   });
-  
-  module.exports = app;
-} else {
-  // Traditional server mode
-  initializeServer().then(() => {
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-    });
-  }).catch(err => {
-    console.error('Failed to start server:', err);
-    process.exit(1);
-  });
-}
+}).catch(err => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});
 
 module.exports = app;
 

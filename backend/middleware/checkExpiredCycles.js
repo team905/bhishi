@@ -1,6 +1,6 @@
 // Middleware to check and close expired cycles on API calls
-// This works on Vercel free tier (no cron jobs needed)
 // Runs asynchronously so it doesn't block the main request
+// Works alongside the setInterval scheduler in server.js
 
 const { manuallyCloseExpiredCycles } = require('../routes/bidding');
 
