@@ -1,5 +1,5 @@
 const express = require('express');
-const { getDb } = require('../config/database');
+const { db } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
@@ -7,110 +7,113 @@ const router = express.Router();
 router.use(authenticate);
 
 // Get bhishi group details
-router.get('/groups/:groupId', (req, res) => {
+router.get('/groups/:groupId', async (req, res) => {
   const { groupId } = req.params;
-  const db = getDb();
 
-  // Check if user is a member
-  db.get('SELECT user_id FROM group_members WHERE group_id = ? AND user_id = ?', [groupId, req.user.id], (err, member) => {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
-    }
-    if (!member && req.user.role !== 'admin') {
+  try {
+    // Check if user is a member
+    const members = await db.getAll('group_members', [
+      { field: 'group_id', operator: '==', value: groupId },
+      { field: 'user_id', operator: '==', value: req.user.id }
+    ]);
+
+    if (members.length === 0 && req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Access denied. Not a member of this group.' });
     }
 
     // Get group details
-    db.get(`
-      SELECT 
-        bg.*,
-        u.full_name as created_by_name,
-        COUNT(DISTINCT gm.user_id) as current_members
-      FROM bhishi_groups bg
-      LEFT JOIN users u ON bg.created_by = u.id
-      LEFT JOIN group_members gm ON bg.id = gm.group_id
-      WHERE bg.id = ?
-      GROUP BY bg.id
-    `, [groupId], (err, group) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
-      if (!group) {
-        return res.status(404).json({ error: 'Group not found' });
-      }
+    const group = await db.getById('bhishi_groups', groupId);
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
 
-      // Get members
-      db.all(`
-        SELECT u.id, u.username, u.full_name, u.email, gm.joined_at
-        FROM group_members gm
-        INNER JOIN users u ON gm.user_id = u.id
-        WHERE gm.group_id = ?
-        ORDER BY gm.joined_at ASC
-      `, [groupId], (err, members) => {
-        if (err) {
-          return res.status(500).json({ error: 'Database error' });
-        }
+    // Get creator name
+    const creator = await db.getById('users', group.created_by);
 
-        // Get cycles
-        db.all(`
-          SELECT 
-            bc.*,
-            u.full_name as winner_name
-          FROM bidding_cycles bc
-          LEFT JOIN users u ON bc.winner_user_id = u.id
-          WHERE bc.group_id = ?
-          ORDER BY bc.cycle_number ASC
-        `, [groupId], (err, cycles) => {
-          if (err) {
-            return res.status(500).json({ error: 'Database error' });
-          }
+    // Get member count
+    const allMembers = await db.getAll('group_members', [
+      { field: 'group_id', operator: '==', value: groupId }
+    ], { field: 'joined_at', direction: 'asc' });
 
-          res.json({
-            ...group,
-            members,
-            cycles
-          });
-        });
-      });
+    // Get members with user details
+    const membersWithDetails = await Promise.all(allMembers.map(async (member) => {
+      const user = await db.getById('users', member.user_id);
+      return {
+        id: user.id,
+        username: user.username,
+        full_name: user.full_name,
+        email: user.email,
+        joined_at: member.joined_at
+      };
+    }));
+
+    // Get cycles
+    const cycles = await db.getAll('bidding_cycles', [
+      { field: 'group_id', operator: '==', value: groupId }
+    ], { field: 'cycle_number', direction: 'asc' });
+
+    // Enrich cycles with winner names
+    const cyclesWithWinners = await Promise.all(cycles.map(async (cycle) => {
+      const winner = cycle.winner_user_id ? await db.getById('users', cycle.winner_user_id) : null;
+      return {
+        ...cycle,
+        winner_name: winner ? winner.full_name : null
+      };
+    }));
+
+    res.json({
+      ...group,
+      created_by_name: creator ? creator.full_name : null,
+      current_members: allMembers.length,
+      members: membersWithDetails,
+      cycles: cyclesWithWinners
     });
-  });
+  } catch (error) {
+    console.error('Error fetching group:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // Get payment status for all members in a cycle
-router.get('/groups/:groupId/cycles/:cycleId/payments', (req, res) => {
+router.get('/groups/:groupId/cycles/:cycleId/payments', async (req, res) => {
   const { groupId, cycleId } = req.params;
-  const db = getDb();
 
-  // Verify user is a member of the group or is admin
-  db.get('SELECT user_id FROM group_members WHERE group_id = ? AND user_id = ?', [groupId, req.user.id], (err, member) => {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
-    }
-    if (!member && req.user.role !== 'admin') {
+  try {
+    // Verify user is a member of the group or is admin
+    const members = await db.getAll('group_members', [
+      { field: 'group_id', operator: '==', value: groupId },
+      { field: 'user_id', operator: '==', value: req.user.id }
+    ]);
+
+    if (members.length === 0 && req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Access denied. Not a member of this group.' });
     }
 
-    // Get all contributions for this cycle with member details
-    db.all(`
-      SELECT 
-        c.*,
-        u.id as user_id,
-        u.full_name,
-        u.username,
-        u.email
-      FROM contributions c
-      INNER JOIN users u ON c.user_id = u.id
-      WHERE c.cycle_id = ?
-      ORDER BY u.full_name ASC
-    `, [cycleId], (err, contributions) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
+    // Get all contributions for this cycle
+    const contributions = await db.getAll('contributions', [
+      { field: 'cycle_id', operator: '==', value: cycleId }
+    ]);
 
-      res.json(contributions);
-    });
-  });
+    // Enrich with member details
+    const contributionsWithDetails = await Promise.all(contributions.map(async (contribution) => {
+      const user = await db.getById('users', contribution.user_id);
+      return {
+        ...contribution,
+        user_id: user.id,
+        full_name: user.full_name,
+        username: user.username,
+        email: user.email
+      };
+    }));
+
+    // Sort by full name
+    contributionsWithDetails.sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
+
+    res.json(contributionsWithDetails);
+  } catch (error) {
+    console.error('Error fetching payments:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 module.exports = router;
-

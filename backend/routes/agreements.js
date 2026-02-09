@@ -1,55 +1,56 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { getDb } = require('../config/database');
+const { db } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
+const admin = require('firebase-admin');
 
 const router = express.Router();
 
 router.use(authenticate);
 
 // Get agreement for a cycle (winner only)
-router.get('/cycles/:cycleId', (req, res) => {
+router.get('/cycles/:cycleId', async (req, res) => {
   const { cycleId } = req.params;
-  const db = getDb();
 
-  // Check if user is the winner and get user details
-  db.get(`
-    SELECT bc.winner_user_id, bc.status, bc.winning_bid_amount, bc.total_pool_amount,
-           bg.name as group_name, bc.cycle_number
-    FROM bidding_cycles bc
-    INNER JOIN bhishi_groups bg ON bc.group_id = bg.id
-    WHERE bc.id = ?
-  `, [cycleId], (err, cycle) => {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
-    }
+  try {
+    // Check if user is the winner and get cycle details
+    const cycle = await db.getById('bidding_cycles', cycleId);
     if (!cycle) {
       return res.status(404).json({ error: 'Cycle not found' });
     }
+
     if (cycle.winner_user_id !== req.user.id) {
       return res.status(403).json({ error: 'You are not the winner of this cycle' });
     }
 
+    // Get group details
+    const group = await db.getById('bhishi_groups', cycle.group_id);
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
     // Get user details
-    db.get('SELECT full_name, username, email FROM users WHERE id = ?', [req.user.id], (err, user) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
+    const user = await db.getById('users', req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
 
-      // Get existing agreement if any
-      db.get('SELECT * FROM agreements WHERE cycle_id = ? AND user_id = ?', [cycleId, req.user.id], (err, agreement) => {
-        if (err) {
-          return res.status(500).json({ error: 'Database error' });
-        }
+    // Get existing agreement if any
+    const agreements = await db.getAll('agreements', [
+      { field: 'cycle_id', operator: '==', value: cycleId },
+      { field: 'user_id', operator: '==', value: req.user.id }
+    ]);
 
-        const userName = user?.full_name || user?.username || req.user.username;
-        const userEmail = user?.email || req.user.email || '';
+    const agreement = agreements.length > 0 ? agreements[0] : null;
 
-        const agreementText = `AGREEMENT FOR BHISHI WINNER
+    const userName = user.full_name || user.username || req.user.username;
+    const userEmail = user.email || '';
+
+    const agreementText = `AGREEMENT FOR BHISHI WINNER
 
 I, ${userName}, hereby agree to the following terms and conditions for winning the Bhishi amount:
 
-1. I acknowledge that I have won the Bhishi for ${cycle.group_name} - Cycle #${cycle.cycle_number}
+1. I acknowledge that I have won the Bhishi for ${group.name} - Cycle #${cycle.cycle_number}
 2. I understand that I will receive ₹${cycle.total_pool_amount - cycle.winning_bid_amount} (Total Pool: ₹${cycle.total_pool_amount} - My Bid: ₹${cycle.winning_bid_amount})
 3. I agree to continue contributing ₹${cycle.winning_bid_amount} for all remaining cycles in this group
 4. I understand that the profit amount (₹${cycle.winning_bid_amount}) will be distributed equally among other group members
@@ -62,28 +63,29 @@ Date: ${new Date().toLocaleDateString()}
 Winner: ${userName}
 Email: ${userEmail}`;
 
-        res.json({
-          cycle: {
-            id: cycleId,
-            groupName: cycle.group_name,
-            cycleNumber: cycle.cycle_number,
-            winningBidAmount: cycle.winning_bid_amount,
-            totalPoolAmount: cycle.total_pool_amount,
-            payoutAmount: cycle.total_pool_amount - cycle.winning_bid_amount
-          },
-          agreement: agreement || null,
-          agreementText: agreementText
-        });
-      });
+    res.json({
+      cycle: {
+        id: cycleId,
+        groupName: group.name,
+        cycleNumber: cycle.cycle_number,
+        winningBidAmount: cycle.winning_bid_amount,
+        totalPoolAmount: cycle.total_pool_amount,
+        payoutAmount: cycle.total_pool_amount - cycle.winning_bid_amount
+      },
+      agreement: agreement || null,
+      agreementText: agreementText
     });
-  });
+  } catch (error) {
+    console.error('Error fetching agreement:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // Sign agreement
 router.post('/sign', [
-  body('cycleId').isInt().withMessage('Cycle ID is required'),
+  body('cycleId').notEmpty().withMessage('Cycle ID is required'),
   body('signatureData').notEmpty().withMessage('Signature is required')
-], (req, res) => {
+], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     const errorMessages = errors.array().map(e => e.msg).join(', ');
@@ -91,13 +93,10 @@ router.post('/sign', [
   }
 
   const { cycleId, signatureData } = req.body;
-  const db = getDb();
 
-  // Verify user is the winner
-  db.get('SELECT winner_user_id, status FROM bidding_cycles WHERE id = ?', [cycleId], (err, cycle) => {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
-    }
+  try {
+    // Verify user is the winner
+    const cycle = await db.getById('bidding_cycles', cycleId);
     if (!cycle) {
       return res.status(404).json({ error: 'Cycle not found' });
     }
@@ -109,37 +108,37 @@ router.post('/sign', [
     }
 
     // Check if already signed
-    db.get('SELECT id FROM agreements WHERE cycle_id = ? AND user_id = ?', [cycleId, req.user.id], (err, existing) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
-      if (existing) {
-        return res.status(400).json({ error: 'Agreement already signed' });
-      }
+    const existing = await db.getAll('agreements', [
+      { field: 'cycle_id', operator: '==', value: cycleId },
+      { field: 'user_id', operator: '==', value: req.user.id }
+    ]);
 
-      // Create agreement record
-      const ipAddress = req.ip || req.connection.remoteAddress;
-      const userAgent = req.get('user-agent');
+    if (existing.length > 0) {
+      return res.status(400).json({ error: 'Agreement already signed' });
+    }
 
-      db.run(
-        `INSERT INTO agreements (cycle_id, user_id, agreement_text, signature_data, signed_at, ip_address, user_agent)
-         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)`,
-        [cycleId, req.user.id, '', signatureData, ipAddress, userAgent],
-        function(err) {
-          if (err) {
-            console.error('Error creating agreement:', err);
-            return res.status(500).json({ error: 'Failed to sign agreement' });
-          }
+    // Create agreement record
+    const ipAddress = req.ip || req.connection.remoteAddress;
+    const userAgent = req.get('user-agent');
 
-          res.json({
-            message: 'Agreement signed successfully',
-            agreementId: this.lastID
-          });
-        }
-      );
+    const newAgreement = await db.create('agreements', {
+      cycle_id: cycleId,
+      user_id: req.user.id,
+      agreement_text: '',
+      signature_data: signatureData,
+      signed_at: admin.firestore.FieldValue.serverTimestamp(),
+      ip_address: ipAddress,
+      user_agent: userAgent,
     });
-  });
+
+    res.json({
+      message: 'Agreement signed successfully',
+      agreementId: newAgreement.id
+    });
+  } catch (error) {
+    console.error('Error signing agreement:', error);
+    res.status(500).json({ error: 'Failed to sign agreement' });
+  }
 });
 
 module.exports = router;
-

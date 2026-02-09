@@ -1,5 +1,5 @@
 const express = require('express');
-const { getDb } = require('../config/database');
+const { db } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
@@ -7,253 +7,342 @@ const router = express.Router();
 router.use(authenticate);
 
 // Get user's groups
-router.get('/groups', (req, res) => {
-  const db = getDb();
-  db.all(`
-    SELECT 
-      bg.*,
-      COUNT(DISTINCT gm.user_id) as current_members
-    FROM bhishi_groups bg
-    INNER JOIN group_members gm ON bg.id = gm.group_id
-    WHERE gm.user_id = ?
-    GROUP BY bg.id
-    ORDER BY bg.created_at DESC
-  `, [req.user.id], (err, groups) => {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
+router.get('/groups', async (req, res) => {
+  try {
+    // Get groups where user is a member
+    const userMemberships = await db.getAll('group_members', [
+      { field: 'user_id', operator: '==', value: req.user.id }
+    ]);
+
+    const groupIds = userMemberships.map(m => m.group_id);
+
+    if (groupIds.length === 0) {
+      return res.json([]);
     }
-    res.json(groups);
-  });
+
+    // Get all groups
+    const groups = await Promise.all(groupIds.map(async (groupId) => {
+      const group = await db.getById('bhishi_groups', groupId);
+      if (!group) return null;
+
+      // Get member count
+      const allMembers = await db.getAll('group_members', [
+        { field: 'group_id', operator: '==', value: groupId }
+      ]);
+
+      return {
+        ...group,
+        current_members: allMembers.length
+      };
+    }));
+
+    // Filter out nulls and sort by created_at
+    const validGroups = groups.filter(g => g !== null);
+    validGroups.sort((a, b) => {
+      const dateA = a.created_at?.toDate ? a.created_at.toDate() : new Date(a.created_at);
+      const dateB = b.created_at?.toDate ? b.created_at.toDate() : new Date(b.created_at);
+      return dateB - dateA;
+    });
+
+    res.json(validGroups);
+  } catch (error) {
+    console.error('Error fetching groups:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // Get user dashboard data
-router.get('/dashboard', (req, res) => {
-  const db = getDb();
-  const userId = req.user.id;
+router.get('/dashboard', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    console.log('[Dashboard] Fetching dashboard data for user:', userId);
 
-  // Get user's groups
-  db.all(`
-    SELECT 
-      bg.*, 
-      COUNT(DISTINCT gm2.user_id) as current_members,
-      (SELECT COUNT(DISTINCT bc.winner_user_id)
-       FROM bidding_cycles bc
-       WHERE bc.group_id = bg.id AND bc.winner_user_id IS NOT NULL AND bc.admin_approved = 1) as winners_count
-    FROM bhishi_groups bg
-    INNER JOIN group_members gm ON bg.id = gm.group_id
-    LEFT JOIN group_members gm2 ON bg.id = gm2.group_id
-    WHERE gm.user_id = ?
-    GROUP BY bg.id
-  `, [userId], (err, groups) => {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
-    }
+    // Get user's groups
+    const userMemberships = await db.getAll('group_members', [
+      { field: 'user_id', operator: '==', value: userId }
+    ]);
+
+    const groupIds = userMemberships.map(m => m.group_id);
+
+    // Get groups with details
+    const groups = await Promise.all(groupIds.map(async (groupId) => {
+      const group = await db.getById('bhishi_groups', groupId);
+      if (!group) return null;
+
+      // Get member count
+      const allMembers = await db.getAll('group_members', [
+        { field: 'group_id', operator: '==', value: groupId }
+      ]);
+
+      // Get winners count
+      const closedCycles = await db.getAll('bidding_cycles', [
+        { field: 'group_id', operator: '==', value: groupId },
+        { field: 'admin_approved', operator: '==', value: true }
+      ]);
+
+      const uniqueWinners = new Set(closedCycles
+        .filter(c => c.winner_user_id)
+        .map(c => c.winner_user_id)
+      );
+
+      return {
+        ...group,
+        current_members: allMembers.length,
+        winners_count: uniqueWinners.size
+      };
+    }));
+
+    const validGroups = groups.filter(g => g !== null);
 
     // Get active bidding cycles for user's groups
-    const groupIds = groups.map(g => g.id);
-    const placeholders = groupIds.length > 0 ? groupIds.map(() => '?').join(',') : '';
-    
-    // Get active cycles (even if no groups, we still need to fetch contributions)
-    const activeCyclesQuery = groupIds.length > 0 ? `
-      SELECT bc.*, bg.name as group_name
-      FROM bidding_cycles bc
-      INNER JOIN bhishi_groups bg ON bc.group_id = bg.id
-      WHERE bc.group_id IN (${placeholders}) AND bc.status = 'open'
-      ORDER BY bc.bidding_end_date ASC
-    ` : 'SELECT NULL as id WHERE 1=0'; // Empty result if no groups
-    
-    db.all(activeCyclesQuery, groupIds.length > 0 ? groupIds : [], (err, activeCycles) => {
-      if (err) {
-        console.error('[Dashboard] Error fetching active cycles:', err);
-        return res.status(500).json({ error: 'Database error' });
+    let activeCycles = [];
+    if (groupIds.length > 0) {
+      const allCycles = await Promise.all(groupIds.map(async (groupId) => {
+        return await db.getAll('bidding_cycles', [
+          { field: 'group_id', operator: '==', value: groupId },
+          { field: 'status', operator: '==', value: 'open' }
+        ]);
+      }));
+
+      activeCycles = allCycles.flat();
+
+      // Enrich with group names and sort
+      activeCycles = await Promise.all(activeCycles.map(async (cycle) => {
+        const group = await db.getById('bhishi_groups', cycle.group_id);
+        return {
+          ...cycle,
+          group_name: group ? group.name : null
+        };
+      }));
+
+      activeCycles.sort((a, b) => {
+        const dateA = new Date(a.bidding_end_date);
+        const dateB = new Date(b.bidding_end_date);
+        return dateA - dateB;
+      });
+    }
+
+    // Get user's bids for active cycles
+    const cycleIds = activeCycles.map(c => c.id);
+    let myBids = [];
+    if (cycleIds.length > 0) {
+      const allBids = await Promise.all(cycleIds.map(async (cycleId) => {
+        return await db.getAll('bids', [
+          { field: 'cycle_id', operator: '==', value: cycleId },
+          { field: 'user_id', operator: '==', value: userId }
+        ]);
+      }));
+
+      myBids = allBids.flat();
+
+      // Enrich with cycle and group info
+      myBids = await Promise.all(myBids.map(async (bid) => {
+        const cycle = await db.getById('bidding_cycles', bid.cycle_id);
+        const group = cycle ? await db.getById('bhishi_groups', cycle.group_id) : null;
+        return {
+          ...bid,
+          cycle_number: cycle ? cycle.cycle_number : null,
+          group_name: group ? group.name : null
+        };
+      }));
+    }
+
+    // Get user's contributions (for open and closed cycles)
+    const allContributions = await db.getAll('contributions', [
+      { field: 'user_id', operator: '==', value: userId }
+    ]);
+
+    // Enrich contributions with cycle and group info
+    const contributions = await Promise.all(allContributions.map(async (contribution) => {
+      const cycle = await db.getById('bidding_cycles', contribution.cycle_id);
+      if (!cycle || (cycle.status !== 'open' && cycle.status !== 'closed')) {
+        return null;
       }
 
-      // Get user's bids (even if no active cycles)
-      const cycleIds = activeCycles.map(c => c.id);
-      const myBidsQuery = cycleIds.length > 0 ? `
-        SELECT b.*, bc.cycle_number, bg.name as group_name
-        FROM bids b
-        INNER JOIN bidding_cycles bc ON b.cycle_id = bc.id
-        INNER JOIN bhishi_groups bg ON bc.group_id = bg.id
-        WHERE b.user_id = ? AND b.cycle_id IN (${cycleIds.map(() => '?').join(',')})
-      ` : 'SELECT NULL as id WHERE 1=0'; // Empty result if no cycles
+      const group = await db.getById('bhishi_groups', cycle.group_id);
+      const payableAmount = contribution.payable_amount || contribution.amount;
+      const earnedProfit = contribution.amount - payableAmount;
 
-      db.all(myBidsQuery, cycleIds.length > 0 ? [userId, ...cycleIds] : [], (err, myBids) => {
-        if (err) {
-          console.error('[Dashboard] Error fetching bids:', err);
-          return res.status(500).json({ error: 'Database error' });
-        }
+      return {
+        ...contribution,
+        cycle_id: cycle.id,
+        cycle_number: cycle.cycle_number,
+        group_name: group ? group.name : null,
+        cycle_status: cycle.status,
+        winner_user_id: cycle.winner_user_id,
+        is_winner: cycle.winner_user_id === userId ? 1 : 0,
+        payable_amount: payableAmount,
+        earned_profit: earnedProfit
+      };
+    }));
 
-        // Get user's contributions (ALWAYS fetch this, regardless of active cycles)
-        // Also need to handle case where user has no groups but might have contributions from deleted groups
-        const contributionsQuery = `
-          SELECT 
-            c.*, 
-            bc.id as cycle_id,
-            bc.cycle_number, 
-            bg.name as group_name,
-            bc.status as cycle_status,
-            bc.winner_user_id,
-            CASE WHEN bc.winner_user_id = ? THEN 1 ELSE 0 END as is_winner,
-            COALESCE(c.payable_amount, c.amount) as payable_amount,
-            (c.amount - COALESCE(c.payable_amount, c.amount)) as earned_profit
-          FROM contributions c
-          INNER JOIN bidding_cycles bc ON c.cycle_id = bc.id
-          INNER JOIN bhishi_groups bg ON bc.group_id = bg.id
-          WHERE c.user_id = ? AND bc.status IN ('open', 'closed')
-          ORDER BY bc.created_at DESC
-        `;
-        
-        db.all(contributionsQuery, [userId, userId], (err, contributions) => {
-          if (err) {
-            console.error('[Dashboard] Error fetching contributions:', err);
-            return res.status(500).json({ error: 'Database error' });
-          }
-
-          console.log(`[Dashboard] User ${userId} - Found ${contributions.length} contributions`);
-
-          // Calculate financial summary
-          // Total contributions = sum of all original amounts contributed
-          const totalContributions = contributions.reduce((sum, c) => sum + parseFloat(c.amount || 0), 0);
-          console.log(`[Dashboard] Total contributions: ₹${totalContributions}`);
-          
-          // Total amount due = sum of payable_amount for pending contributions
-          const pendingContribs = contributions.filter(c => c.payment_status === 'pending');
-          const totalAmountDue = pendingContribs.reduce((sum, c) => sum + parseFloat(c.payable_amount || c.amount || 0), 0);
-          console.log(`[Dashboard] Total amount due: ₹${totalAmountDue} (${pendingContribs.length} pending)`);
-          
-          // Get profit distributions (earnings)
-          db.all(`
-            SELECT pd.*, bc.cycle_number, bg.name as group_name
-            FROM profit_distributions pd
-            INNER JOIN bidding_cycles bc ON pd.cycle_id = bc.id
-            INNER JOIN bhishi_groups bg ON bc.group_id = bg.id
-            WHERE pd.user_id = ?
-            ORDER BY pd.created_at DESC
-          `, [userId], (err, profitDistributions) => {
-            if (err) {
-              console.error('[Dashboard] Error fetching profit distributions:', err);
-              return res.status(500).json({ error: 'Database error' });
-            }
-
-            const totalEarnings = profitDistributions.reduce((sum, p) => sum + parseFloat(p.profit_amount || 0), 0);
-            console.log(`[Dashboard] Total earnings: ₹${totalEarnings} (${profitDistributions.length} distributions)`);
-
-            // Get winnings (payouts received)
-            db.all(`
-              SELECT 
-                bc.id as cycle_id,
-                bc.cycle_number,
-                bc.group_id,
-                bg.name as group_name,
-                bc.total_pool_amount,
-                bc.winning_bid_amount,
-                bc.winning_bid_amount as payout_amount,
-                bc.payout_date,
-                bc.admin_approved
-              FROM bidding_cycles bc
-              INNER JOIN bhishi_groups bg ON bc.group_id = bg.id
-              WHERE bc.winner_user_id = ? AND bc.status = 'closed'
-              ORDER BY bc.created_at DESC
-            `, [userId], (err, winnings) => {
-              if (err) {
-                console.error('[Dashboard] Error fetching winnings:', err);
-                return res.status(500).json({ error: 'Database error' });
-              }
-
-              const totalWinnings = winnings
-                .filter(w => w.admin_approved)
-                .reduce((sum, w) => sum + parseFloat(w.payout_amount || 0), 0);
-
-              // Check if user has won in any group (regardless of approval status)
-              const hasWon = winnings.length > 0;
-              
-              console.log(`[Dashboard] Winnings: ${winnings.length} cycles, Total approved: ₹${totalWinnings}, HasWon: ${hasWon}`);
-
-              // Get groups where user has won
-              const groupsWon = new Set(winnings.map(w => w.group_id));
-
-              const netAmount = totalEarnings + totalWinnings - totalContributions;
-              console.log(`[Dashboard] Financial Summary - Contributions: ₹${totalContributions}, Earnings: ₹${totalEarnings}, Winnings: ₹${totalWinnings}, Net: ₹${netAmount}`);
-
-              const financialSummary = {
-                totalContributions,
-                totalEarnings: totalEarnings,
-                totalWinnings: totalWinnings,
-                netAmount: netAmount,
-                totalAmountDue,
-                hasWon,
-                groupsWon: Array.from(groupsWon)
-              };
-
-              console.log(`[Dashboard] Sending financial summary:`, JSON.stringify(financialSummary, null, 2));
-
-              res.json({
-                groups,
-                activeCycles,
-                myBids,
-                contributions,
-                financialSummary,
-                profitDistributions,
-                winnings
-              });
-            });
-          });
-        });
-      });
+    const validContributions = contributions.filter(c => c !== null);
+    validContributions.sort((a, b) => {
+      const dateA = a.created_at?.toDate ? a.created_at.toDate() : new Date(a.created_at);
+      const dateB = b.created_at?.toDate ? b.created_at.toDate() : new Date(b.created_at);
+      return dateB - dateA;
     });
-  });
+
+    console.log(`[Dashboard] User ${userId} - Found ${validContributions.length} contributions`);
+
+    // Calculate financial summary
+    const totalContributions = validContributions.reduce((sum, c) => sum + parseFloat(c.amount || 0), 0);
+    console.log(`[Dashboard] Total contributions: ₹${totalContributions}`);
+
+    const pendingContribs = validContributions.filter(c => c.payment_status === 'pending');
+    const totalAmountDue = pendingContribs.reduce((sum, c) => sum + parseFloat(c.payable_amount || 0), 0);
+    console.log(`[Dashboard] Total amount due: ₹${totalAmountDue} (${pendingContribs.length} pending)`);
+
+    // Get profit distributions (earnings)
+    const profitDistributions = await db.getAll('profit_distributions', [
+      { field: 'user_id', operator: '==', value: userId }
+    ], { field: 'created_at', direction: 'desc' });
+
+    // Enrich profit distributions
+    const enrichedProfitDistributions = await Promise.all(profitDistributions.map(async (pd) => {
+      const cycle = await db.getById('bidding_cycles', pd.cycle_id);
+      const group = cycle ? await db.getById('bhishi_groups', cycle.group_id) : null;
+      return {
+        ...pd,
+        cycle_number: cycle ? cycle.cycle_number : null,
+        group_name: group ? group.name : null
+      };
+    }));
+
+    const totalEarnings = enrichedProfitDistributions.reduce((sum, p) => sum + parseFloat(p.profit_amount || 0), 0);
+    console.log(`[Dashboard] Total earnings: ₹${totalEarnings} (${enrichedProfitDistributions.length} distributions)`);
+
+    // Get winnings (payouts received)
+    const allWinningCycles = await db.getAll('bidding_cycles', [
+      { field: 'winner_user_id', operator: '==', value: userId },
+      { field: 'status', operator: '==', value: 'closed' }
+    ], { field: 'created_at', direction: 'desc' });
+
+    // Enrich winnings
+    const winnings = await Promise.all(allWinningCycles.map(async (cycle) => {
+      const group = await db.getById('bhishi_groups', cycle.group_id);
+      return {
+        cycle_id: cycle.id,
+        cycle_number: cycle.cycle_number,
+        group_id: cycle.group_id,
+        group_name: group ? group.name : null,
+        total_pool_amount: cycle.total_pool_amount,
+        winning_bid_amount: cycle.winning_bid_amount,
+        payout_amount: cycle.winning_bid_amount,
+        payout_date: cycle.payout_date,
+        admin_approved: cycle.admin_approved
+      };
+    }));
+
+    const totalWinnings = winnings
+      .filter(w => w.admin_approved)
+      .reduce((sum, w) => sum + parseFloat(w.payout_amount || 0), 0);
+
+    const hasWon = winnings.length > 0;
+    console.log(`[Dashboard] Winnings: ${winnings.length} cycles, Total approved: ₹${totalWinnings}, HasWon: ${hasWon}`);
+
+    const groupsWon = new Set(winnings.map(w => w.group_id));
+    const netAmount = totalEarnings + totalWinnings - totalContributions;
+    console.log(`[Dashboard] Financial Summary - Contributions: ₹${totalContributions}, Earnings: ₹${totalEarnings}, Winnings: ₹${totalWinnings}, Net: ₹${netAmount}`);
+
+    const financialSummary = {
+      totalContributions,
+      totalEarnings: totalEarnings,
+      totalWinnings: totalWinnings,
+      netAmount: netAmount,
+      totalAmountDue,
+      hasWon,
+      groupsWon: Array.from(groupsWon)
+    };
+
+    console.log(`[Dashboard] Sending financial summary:`, JSON.stringify(financialSummary, null, 2));
+
+    res.json({
+      groups: validGroups,
+      activeCycles,
+      myBids,
+      contributions: validContributions,
+      financialSummary,
+      profitDistributions: enrichedProfitDistributions,
+      winnings
+    });
+  } catch (error) {
+    console.error('[Dashboard] Error:', error);
+    console.error('[Dashboard] Error stack:', error.stack);
+    console.error('[Dashboard] Error message:', error.message);
+    res.status(500).json({ 
+      error: 'Database error',
+      message: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
 });
 
 // Get user notifications
-router.get('/notifications', (req, res) => {
-  const db = getDb();
-  const { unreadOnly } = req.query;
+router.get('/notifications', async (req, res) => {
+  try {
+    const { unreadOnly } = req.query;
 
-  let query = `
-    SELECT 
-      n.*,
-      bc.cycle_number,
-      bg.name as group_name
-    FROM notifications n
-    LEFT JOIN bidding_cycles bc ON n.cycle_id = bc.id
-    LEFT JOIN bhishi_groups bg ON bc.group_id = bg.id
-    WHERE n.user_id = ?
-  `;
+    let conditions = [
+      { field: 'user_id', operator: '==', value: req.user.id }
+    ];
 
-  if (unreadOnly === 'true') {
-    query += ' AND n.is_read = 0';
-  }
-
-  query += ' ORDER BY n.created_at DESC LIMIT 50';
-
-  db.all(query, [req.user.id], (err, notifications) => {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
+    if (unreadOnly === 'true') {
+      conditions.push({ field: 'is_read', operator: '==', value: false });
     }
-    res.json(notifications);
-  });
+
+    const notifications = await db.getAll('notifications', conditions, { field: 'created_at', direction: 'desc' }, 50);
+
+    // Enrich with cycle and group info
+    const enrichedNotifications = await Promise.all(notifications.map(async (notification) => {
+      let cycle = null;
+      let group = null;
+
+      if (notification.cycle_id) {
+        cycle = await db.getById('bidding_cycles', notification.cycle_id);
+        if (cycle) {
+          group = await db.getById('bhishi_groups', cycle.group_id);
+        }
+      }
+
+      return {
+        ...notification,
+        cycle_number: cycle ? cycle.cycle_number : null,
+        group_name: group ? group.name : null
+      };
+    }));
+
+    res.json(enrichedNotifications);
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // Mark notification as read
-router.put('/notifications/:id/read', (req, res) => {
+router.put('/notifications/:id/read', async (req, res) => {
   const { id } = req.params;
-  const db = getDb();
 
-  db.run(
-    'UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?',
-    [id, req.user.id],
-    function(err) {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
-      if (this.changes === 0) {
-        return res.status(404).json({ error: 'Notification not found' });
-      }
-      res.json({ message: 'Notification marked as read' });
+  try {
+    // Verify notification belongs to user
+    const notification = await db.getById('notifications', id);
+    if (!notification) {
+      return res.status(404).json({ error: 'Notification not found' });
     }
-  );
+
+    if (notification.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    await db.update('notifications', id, {
+      is_read: true
+    });
+
+    res.json({ message: 'Notification marked as read' });
+  } catch (error) {
+    console.error('Error updating notification:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 module.exports = router;
-

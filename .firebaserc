@@ -1,0 +1,9 @@
+{
+  "projects": {
+    "default": "bhishi-local",
+    "local": "bhishi-local",
+    "production": "bhishi-management"
+  },
+  "targets": {},
+  "etags": {}
+}

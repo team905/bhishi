@@ -1,105 +1,218 @@
-# Quick Start Guide
+# 🚀 Quick Start Guide - Daily Development
 
-## First Time Setup
+This guide shows you how to **start** the project for daily development work (both local and production).
 
-1. **Install Dependencies**
-   ```bash
-   npm run install-all
+---
+
+## 📍 Local Development (Daily Start)
+
+### Prerequisites Check
+```bash
+# Verify Java 21+ is installed (required for Firestore Emulator)
+java -version
+
+# Verify Node.js is installed
+node -v
+npm -v
+
+# Verify Firebase CLI is installed
+firebase --version
+```
+
+### Step 1: Start Firestore Emulator
+
+**Terminal 1 - Start Emulator:**
+```bash
+# Navigate to project root
+cd /Users/shubham905/Documents/bhishi
+
+# Start Firestore emulator only
+firebase emulators:start --only firestore
+```
+
+**✅ Success:** You should see:
+```
+✔  firestore: Firestore Emulator running at localhost:8080
+✔  ui: Emulator UI running at http://localhost:4000
+```
+
+**Keep this terminal open!** The emulator must stay running.
+
+---
+
+### Step 2: Start Backend Server
+
+**Terminal 2 - Start Backend:**
+```bash
+# Navigate to backend directory
+cd backend
+
+# Make sure .env file exists with these variables:
+# FIREBASE_USE_EMULATOR=true
+# FIREBASE_PROJECT_ID=bhishi-local
+# FIRESTORE_EMULATOR_HOST=localhost:8080
+# NODE_ENV=development
+# PORT=5005
+# JWT_SECRET=local-development-secret-key
+
+# Start backend server
+npm run dev
+```
+
+**✅ Success:** You should see:
+```
+[Firestore] Initializing with Firebase Emulator (local database)
+[Firestore] Using LOCAL database via emulator at: localhost:8080
+[Firestore] Database initialized successfully
+Server running on port 5005
+```
+
+---
+
+### Step 3: Start Frontend
+
+**Terminal 3 - Start Frontend:**
+```bash
+# Navigate to frontend directory
+cd frontend
+
+# Start React development server
+npm start
+```
+
+**✅ Success:** Browser should automatically open to `http://localhost:3000`
+
+---
+
+### 🎯 Access Points
+
+- **Frontend:** http://localhost:3000
+- **Backend API:** http://localhost:5005
+- **Firestore Emulator UI:** http://localhost:4000
+- **Health Check:** http://localhost:5005/api/health
+
+---
+
+### 🛑 Stopping Local Development
+
+1. **Stop Frontend:** Press `Ctrl+C` in Terminal 3
+2. **Stop Backend:** Press `Ctrl+C` in Terminal 2
+3. **Stop Emulator:** Press `Ctrl+C` in Terminal 1
+
+---
+
+## 🌐 Production (Daily Start - View Only)
+
+**Note:** Production is already deployed. You don't need to "start" it - it's always running!
+
+### Access Production
+
+- **Frontend:** https://bhishi-management.web.app
+- **Backend API:** https://bhishi-backend-867590875581.us-central1.run.app
+- **Health Check:** https://bhishi-backend-867590875581.us-central1.run.app/api/health
+
+### View Production Logs
+
+```bash
+# View backend logs
+gcloud run services logs read bhishi-backend --region us-central1 --limit 50
+
+# Follow logs in real-time
+gcloud run services logs tail bhishi-backend --region us-central1
+```
+
+### View Firestore Data (Production)
+
+1. Go to [Firebase Console](https://console.firebase.google.com/project/bhishi-management/firestore/data)
+2. Navigate to your collections
+
+---
+
+## 🔧 Troubleshooting
+
+### Emulator Won't Start
+
+**Error:** "Java not found" or "Java version before 21"
+```bash
+# Install Java 21+
+brew install openjdk@21
+
+# Add to PATH
+echo 'export PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+
+# Verify
+java -version
+```
+
+### Backend Can't Connect to Emulator
+
+1. **Check emulator is running** (Terminal 1)
+2. **Verify `.env` file** in `backend/` directory:
+   ```env
+   FIREBASE_USE_EMULATOR=true
+   FIRESTORE_EMULATOR_HOST=localhost:8080
    ```
+3. **Restart backend** after starting emulator
 
-2. **Set Up Environment**
-   - Create `backend/.env` file:
-     ```
-     PORT=5005
-     JWT_SECRET=your-secret-key-change-in-production
-     NODE_ENV=development
-     ```
+### Frontend Can't Connect to Backend
 
-3. **Start Development Servers**
-   ```bash
-   npm run dev
+1. **Check backend is running** on port 5005
+2. **Verify proxy** in `frontend/package.json`:
+   ```json
+   "proxy": "http://localhost:5005"
    ```
-   
-   This starts:
-   - Backend on http://localhost:5005
-   - Frontend on http://localhost:3000
+3. **Restart frontend**
 
-4. **Login as Admin**
-   - Open http://localhost:3000
-   - Username: `admin`
-   - Password: `admin123`
+### Port Already in Use
 
-## Basic Workflow
+```bash
+# Find process using port 5005
+lsof -i :5005
 
-### Admin Workflow
+# Kill process (replace PID with actual process ID)
+kill -9 <PID>
 
-1. **Create Users**
-   - Go to Admin Dashboard → Users tab
-   - Click "Create User"
-   - Fill in details and set password
-   - Share credentials with users
+# Or use different port
+# In backend/.env, change PORT=5006
+# In frontend/package.json, change proxy to http://localhost:5006
+```
 
-2. **Create a Bhishi Group**
-   - Go to Groups tab
-   - Click "Create Group"
-   - Enter:
-     - Group name and description
-     - Contribution amount (e.g., ₹5005)
-     - Total members (e.g., 10)
-     - Cycle duration (e.g., 30 days)
+---
 
-3. **Add Members to Group**
-   - Find the group in the list
-   - Click "Add Member"
-   - Select a user from dropdown
-   - Repeat until group is full
+## 📝 Quick Commands Reference
 
-4. **Start a Bidding Cycle**
-   - Go to Bidding Cycles tab
-   - Click "Create Bidding Cycle"
-   - Select a group
-   - Set bidding start and end dates/times
-   - Members can now place bids
+```bash
+# Start everything (local)
+# Terminal 1:
+firebase emulators:start --only firestore
 
-5. **Close Bidding & Approve Payout**
-   - After bidding period ends, click "Close"
-   - System determines winner (lowest bid)
-   - Review winner details
-   - Click "Approve Payout"
+# Terminal 2:
+cd backend && npm run dev
 
-### User Workflow
+# Terminal 3:
+cd frontend && npm start
 
-1. **Login** with credentials provided by admin
+# Check if services are running
+curl http://localhost:5005/api/health
+curl http://localhost:3000
 
-2. **View Dashboard**
-   - See active bidding cycles
-   - View your groups
-   - Check contribution status
+# View emulator data
+open http://localhost:4000
+```
 
-3. **Place a Bid**
-   - Click "Place Bid" on an active cycle
-   - Enter your bid amount (lower is better)
-   - Submit bid
-   - You can update your bid before the deadline
+---
 
-4. **View Bids**
-   - Click "View All Bids" to see all bids
-   - Lowest bid is highlighted in green
+## 🎓 Default Login Credentials
 
-## Important Notes
+**Local Development:**
+- Username: `admin`
+- Password: `admin123`
 
-- **Bidding System**: Lowest bid wins the pool
-- **Winner Receives**: Total Pool - Winning Bid Amount
-- **Members Contribute**: Fixed contribution amount each cycle
-- **One Winner Per Cycle**: Each member wins once per group
+**Production:**
+- Use the credentials you set up during deployment
 
-## Troubleshooting
+---
 
-- **Port conflicts**: Change PORT in backend/.env
-- **Database errors**: Delete `backend/data/bhishi.db` and restart (will recreate)
-- **Login issues**: Check JWT_SECRET in backend/.env matches
-
-## Need Help?
-
-Check the main README.md for detailed documentation.
+**Happy Coding! 🚀**
 

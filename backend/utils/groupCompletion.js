@@ -1,46 +1,38 @@
-const { getDb } = require('../config/database');
+const { db } = require('../config/database');
 
 /**
  * Check if all members of a group have won and mark group as completed
  */
-const checkGroupCompletion = (groupId) => {
-  const db = getDb();
-
-  // Get total members in group
-  db.get('SELECT total_members FROM bhishi_groups WHERE id = ?', [groupId], (err, group) => {
-    if (err || !group) {
-      console.error('Error checking group completion:', err);
+const checkGroupCompletion = async (groupId) => {
+  try {
+    // Get total members in group
+    const group = await db.getById('bhishi_groups', groupId);
+    if (!group) {
+      console.error('Error checking group completion: Group not found');
       return;
     }
 
-    // Get count of unique winners
-    db.get(`
-      SELECT COUNT(DISTINCT winner_user_id) as winner_count
-      FROM bidding_cycles
-      WHERE group_id = ? AND winner_user_id IS NOT NULL AND admin_approved = 1
-    `, [groupId], (err, result) => {
-      if (err) {
-        console.error('Error counting winners:', err);
-        return;
-      }
+    // Get count of unique winners (approved cycles only)
+    const closedCycles = await db.getAll('bidding_cycles', [
+      { field: 'group_id', operator: '==', value: groupId },
+      { field: 'admin_approved', operator: '==', value: true }
+    ]);
 
-      // If all members have won, mark group as completed
-      if (result.winner_count >= group.total_members) {
-        db.run(
-          'UPDATE bhishi_groups SET status = ? WHERE id = ?',
-          ['completed', groupId],
-          (err) => {
-            if (err) {
-              console.error('Error marking group as completed:', err);
-            } else {
-              console.log(`Group ${groupId} marked as completed - all ${group.total_members} members have won`);
-            }
-          }
-        );
-      }
-    });
-  });
+    const uniqueWinners = new Set(closedCycles
+      .filter(c => c.winner_user_id)
+      .map(c => c.winner_user_id)
+    );
+
+    // If all members have won, mark group as completed
+    if (uniqueWinners.size >= group.total_members) {
+      await db.update('bhishi_groups', groupId, {
+        status: 'completed'
+      });
+      console.log(`Group ${groupId} marked as completed - all ${group.total_members} members have won`);
+    }
+  } catch (error) {
+    console.error('Error checking group completion:', error);
+  }
 };
 
 module.exports = { checkGroupCompletion };
-

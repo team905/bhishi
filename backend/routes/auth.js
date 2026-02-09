@@ -2,7 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
-const { getDb } = require('../config/database');
+const { getFirestore, db } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
@@ -19,50 +19,45 @@ router.post('/login', [
     }
 
     const { username, password } = req.body;
-    const db = getDb();
 
-    db.get('SELECT * FROM users WHERE username = ? AND is_active = 1', [username], async (err, user) => {
-      if (err) {
-        console.error('Database error during login:', err);
-        return res.status(500).json({ error: 'Database error' });
-      }
-
-      if (!user) {
+    try {
+      // Find user by username and active status
+      const user = await db.getByField('users', 'username', username);
+      
+      if (!user || !user.is_active) {
         console.log('Login attempt failed: User not found or inactive -', username);
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      try {
-        const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) {
-          console.log('Login attempt failed: Invalid password for user -', username);
-          return res.status(401).json({ error: 'Invalid credentials' });
-        }
-
-        const token = jwt.sign(
-          { id: user.id, username: user.username, role: user.role },
-          process.env.JWT_SECRET || 'your-secret-key-change-in-production',
-          { expiresIn: '24h' }
-        );
-
-        console.log('Login successful for user:', username);
-        res.json({
-          token,
-          user: {
-            id: user.id,
-            username: user.username,
-            email: user.email,
-            fullName: user.full_name,
-            role: user.role,
-            requiresPasswordChange: user.password_changed === 0
-          },
-          requiresPasswordChange: user.password_changed === 0
-        });
-      } catch (bcryptError) {
-        console.error('Password comparison error:', bcryptError);
-        return res.status(500).json({ error: 'Authentication error' });
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) {
+        console.log('Login attempt failed: Invalid password for user -', username);
+        return res.status(401).json({ error: 'Invalid credentials' });
       }
-    });
+
+      const token = jwt.sign(
+        { id: user.id, username: user.username, role: user.role },
+        process.env.JWT_SECRET || 'your-secret-key-change-in-production',
+        { expiresIn: '24h' }
+      );
+
+      console.log('Login successful for user:', username);
+      res.json({
+        token,
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          fullName: user.full_name,
+          role: user.role,
+          requiresPasswordChange: user.password_changed === false || user.password_changed === 0
+        },
+        requiresPasswordChange: user.password_changed === false || user.password_changed === 0
+      });
+    } catch (error) {
+      console.error('Database error during login:', error);
+      return res.status(500).json({ error: 'Database error' });
+    }
   } catch (error) {
     console.error('Login route error:', error);
     res.status(500).json({ error: 'Server error' });
@@ -70,24 +65,26 @@ router.post('/login', [
 });
 
 // Get current user
-router.get('/me', authenticate, (req, res) => {
-  const db = getDb();
-  db.get('SELECT id, username, email, full_name, role, password_changed FROM users WHERE id = ?', [req.user.id], (err, user) => {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
-    }
+router.get('/me', authenticate, async (req, res) => {
+  try {
+    const user = await db.getById('users', req.user.id);
+    
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
+    
     res.json({
       id: user.id,
       username: user.username,
       email: user.email,
       fullName: user.full_name,
       role: user.role,
-      requiresPasswordChange: user.password_changed === 0
+      requiresPasswordChange: user.password_changed === false || user.password_changed === 0
     });
-  });
+  } catch (error) {
+    console.error('Error fetching user:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // Change password (for first-time login or regular password change)
@@ -102,48 +99,36 @@ router.post('/change-password', authenticate, [
     }
 
     const { currentPassword, newPassword } = req.body;
-    const db = getDb();
     const userId = req.user.id;
 
-    // Get user with password
-    db.get('SELECT password, password_changed FROM users WHERE id = ?', [userId], async (err, user) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
+    try {
+      // Get user with password
+      const user = await db.getById('users', userId);
+      
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
       }
 
-      // For first-time password change, currentPassword might be the default password
-      // For regular password change, verify current password
-      if (user.password_changed === 1) {
-        const isMatch = await bcrypt.compare(currentPassword, user.password);
-        if (!isMatch) {
-          return res.status(401).json({ error: 'Current password is incorrect' });
-        }
-      } else {
-        // First-time login - verify against current password
-        const isMatch = await bcrypt.compare(currentPassword, user.password);
-        if (!isMatch) {
-          return res.status(401).json({ error: 'Current password is incorrect' });
-        }
+      // Verify current password
+      const isMatch = await bcrypt.compare(currentPassword, user.password);
+      if (!isMatch) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
       }
 
       // Hash new password
       const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-      // Update password and set password_changed to 1
-      db.run(
-        'UPDATE users SET password = ?, password_changed = 1 WHERE id = ?',
-        [hashedPassword, userId],
-        function(err) {
-          if (err) {
-            return res.status(500).json({ error: 'Failed to update password' });
-          }
-          res.json({ message: 'Password changed successfully' });
-        }
-      );
-    });
+      // Update password and set password_changed to true
+      await db.update('users', userId, {
+        password: hashedPassword,
+        password_changed: true
+      });
+
+      res.json({ message: 'Password changed successfully' });
+    } catch (error) {
+      console.error('Error changing password:', error);
+      res.status(500).json({ error: 'Failed to update password' });
+    }
   } catch (error) {
     console.error('Change password error:', error);
     res.status(500).json({ error: 'Server error' });

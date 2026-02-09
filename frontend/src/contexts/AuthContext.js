@@ -1,5 +1,9 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import axios from 'axios';
+import { getApiUrl } from '../config/api';
+
+// Configure axios base URL
+axios.defaults.baseURL = process.env.REACT_APP_API_URL || '';
 
 const AuthContext = createContext();
 
@@ -27,7 +31,7 @@ export const AuthProvider = ({ children }) => {
 
   const fetchUser = async () => {
     try {
-      const response = await axios.get('/api/auth/me');
+      const response = await axios.get(getApiUrl('/auth/me'));
       setUser(response.data);
     } catch (error) {
       localStorage.removeItem('token');
@@ -40,7 +44,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (username, password) => {
     try {
-      const response = await axios.post('/api/auth/login', { username, password });
+      const response = await axios.post(getApiUrl('/auth/login'), { username, password });
       const { token, user, requiresPasswordChange } = response.data;
       localStorage.setItem('token', token);
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
@@ -57,7 +61,7 @@ export const AuthProvider = ({ children }) => {
 
   const changePassword = async (currentPassword, newPassword) => {
     try {
-      const response = await axios.post('/api/auth/change-password', {
+      const response = await axios.post(getApiUrl('/auth/change-password'), {
         currentPassword,
         newPassword
       });

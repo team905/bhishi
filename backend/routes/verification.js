@@ -1,22 +1,20 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { getDb } = require('../config/database');
+const { db } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
+const admin = require('firebase-admin');
 
 const router = express.Router();
 
 router.use(authenticate);
 
 // Get video verification status for a cycle (winner only)
-router.get('/cycles/:cycleId', (req, res) => {
+router.get('/cycles/:cycleId', async (req, res) => {
   const { cycleId } = req.params;
-  const db = getDb();
 
-  // Check if user is the winner
-  db.get('SELECT winner_user_id, status FROM bidding_cycles WHERE id = ?', [cycleId], (err, cycle) => {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
-    }
+  try {
+    // Check if user is the winner
+    const cycle = await db.getById('bidding_cycles', cycleId);
     if (!cycle) {
       return res.status(404).json({ error: 'Cycle not found' });
     }
@@ -25,24 +23,28 @@ router.get('/cycles/:cycleId', (req, res) => {
     }
 
     // Get existing verification if any
-    db.get('SELECT * FROM video_verifications WHERE cycle_id = ? AND user_id = ?', [cycleId, req.user.id], (err, verification) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
+    const verifications = await db.getAll('video_verifications', [
+      { field: 'cycle_id', operator: '==', value: cycleId },
+      { field: 'user_id', operator: '==', value: req.user.id }
+    ]);
 
-      res.json({
-        verification: verification || null,
-        canUpload: cycle.status === 'closed' && (!verification || verification.verification_status === 'pending')
-      });
+    const verification = verifications.length > 0 ? verifications[0] : null;
+
+    res.json({
+      verification: verification || null,
+      canUpload: cycle.status === 'closed' && (!verification || verification.verification_status === 'pending')
     });
-  });
+  } catch (error) {
+    console.error('Error fetching verification:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // Upload video verification
 router.post('/upload', [
-  body('cycleId').isInt().withMessage('Cycle ID is required'),
+  body('cycleId').notEmpty().withMessage('Cycle ID is required'),
   body('videoUrl').notEmpty().withMessage('Video URL is required')
-], (req, res) => {
+], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     const errorMessages = errors.array().map(e => e.msg).join(', ');
@@ -50,13 +52,10 @@ router.post('/upload', [
   }
 
   const { cycleId, videoUrl, notes } = req.body;
-  const db = getDb();
 
-  // Verify user is the winner
-  db.get('SELECT winner_user_id, status FROM bidding_cycles WHERE id = ?', [cycleId], (err, cycle) => {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
-    }
+  try {
+    // Verify user is the winner
+    const cycle = await db.getById('bidding_cycles', cycleId);
     if (!cycle) {
       return res.status(404).json({ error: 'Cycle not found' });
     }
@@ -68,48 +67,44 @@ router.post('/upload', [
     }
 
     // Check if verification already exists
-    db.get('SELECT id FROM video_verifications WHERE cycle_id = ? AND user_id = ?', [cycleId, req.user.id], (err, existing) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
+    const existing = await db.getAll('video_verifications', [
+      { field: 'cycle_id', operator: '==', value: cycleId },
+      { field: 'user_id', operator: '==', value: req.user.id }
+    ]);
 
-      if (existing) {
-        // Update existing verification
-        db.run(
-          'UPDATE video_verifications SET video_url = ?, notes = ?, verification_status = ? WHERE cycle_id = ? AND user_id = ?',
-          [videoUrl, notes || null, 'pending', cycleId, req.user.id],
-          function(err) {
-            if (err) {
-              return res.status(500).json({ error: 'Failed to update video verification' });
-            }
-            res.json({ message: 'Video verification updated successfully' });
-          }
-        );
-      } else {
-        // Create new verification
-        db.run(
-          'INSERT INTO video_verifications (cycle_id, user_id, video_url, notes, verification_status) VALUES (?, ?, ?, ?, ?)',
-          [cycleId, req.user.id, videoUrl, notes || null, 'pending'],
-          function(err) {
-            if (err) {
-              return res.status(500).json({ error: 'Failed to upload video verification' });
-            }
-            res.json({
-              message: 'Video verification uploaded successfully',
-              verificationId: this.lastID
-            });
-          }
-        );
-      }
-    });
-  });
+    if (existing.length > 0) {
+      // Update existing verification
+      await db.update('video_verifications', existing[0].id, {
+        video_url: videoUrl,
+        notes: notes || null,
+        verification_status: 'pending',
+      });
+      res.json({ message: 'Video verification updated successfully' });
+    } else {
+      // Create new verification
+      const newVerification = await db.create('video_verifications', {
+        cycle_id: cycleId,
+        user_id: req.user.id,
+        video_url: videoUrl,
+        notes: notes || null,
+        verification_status: 'pending',
+      });
+      res.json({
+        message: 'Video verification uploaded successfully',
+        verificationId: newVerification.id
+      });
+    }
+  } catch (error) {
+    console.error('Error uploading verification:', error);
+    res.status(500).json({ error: 'Failed to upload video verification' });
+  }
 });
 
 // Admin: Approve/reject video verification
 router.post('/:verificationId/verify', [
   body('status').isIn(['approved', 'rejected']).withMessage('Status must be approved or rejected'),
   body('notes').optional()
-], (req, res) => {
+], async (req, res) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Only admin can verify videos' });
   }
@@ -122,22 +117,20 @@ router.post('/:verificationId/verify', [
 
   const { verificationId } = req.params;
   const { status, notes } = req.body;
-  const db = getDb();
 
-  db.run(
-    'UPDATE video_verifications SET verification_status = ?, verified_at = CURRENT_TIMESTAMP, verified_by = ?, notes = ? WHERE id = ?',
-    [status, req.user.id, notes || null, verificationId],
-    function(err) {
-      if (err) {
-        return res.status(500).json({ error: 'Failed to update verification status' });
-      }
-      if (this.changes === 0) {
-        return res.status(404).json({ error: 'Verification not found' });
-      }
-      res.json({ message: `Video verification ${status} successfully` });
-    }
-  );
+  try {
+    await db.update('video_verifications', verificationId, {
+      verification_status: status,
+      verified_at: admin.firestore.FieldValue.serverTimestamp(),
+      verified_by: req.user.id,
+      notes: notes || null,
+    });
+
+    res.json({ message: `Video verification ${status} successfully` });
+  } catch (error) {
+    console.error('Error updating verification:', error);
+    res.status(500).json({ error: 'Failed to update verification status' });
+  }
 });
 
 module.exports = router;
-

@@ -1,183 +1,213 @@
-const { getDb } = require('../config/database');
+const { db } = require('../config/database');
+const admin = require('firebase-admin');
 
 // Notify users about bidding cycle
 const notifyBiddingCycle = async (cycleId) => {
-  const db = getDb();
-  
-  return new Promise((resolve, reject) => {
+  try {
     // Get cycle details
-    db.get(`
-      SELECT 
-        bc.*,
-        bg.name as group_name,
-        bg.id as group_id
-      FROM bidding_cycles bc
-      INNER JOIN bhishi_groups bg ON bc.group_id = bg.id
-      WHERE bc.id = ?
-    `, [cycleId], (err, cycle) => {
-      if (err) {
-        console.error('Error fetching cycle:', err);
-        return reject(err);
-      }
-      if (!cycle) {
-        return reject(new Error('Cycle not found'));
-      }
+    const cycle = await db.getById('bidding_cycles', cycleId);
+    if (!cycle) {
+      throw new Error('Cycle not found');
+    }
 
-      // Get all group members with their contact info
-      db.all(`
-        SELECT gm.user_id, u.phone, u.email, u.full_name
-        FROM group_members gm
-        INNER JOIN users u ON gm.user_id = u.id
-        WHERE gm.group_id = ?
-      `, [cycle.group_id], (err, members) => {
-        if (err) {
-          console.error('Error fetching group members:', err);
-          return reject(err);
-        }
+    const group = await db.getById('bhishi_groups', cycle.group_id);
+    if (!group) {
+      throw new Error('Group not found');
+    }
 
-        // Format dates
-        const biddingDate = new Date(cycle.bidding_start_date).toLocaleDateString();
-        const biddingTime = new Date(cycle.bidding_start_date).toLocaleTimeString();
-        const biddingEndTime = new Date(cycle.bidding_end_date).toLocaleTimeString();
+    // Get all group members with their contact info
+    const members = await db.getAll('group_members', [
+      { field: 'group_id', operator: '==', value: cycle.group_id }
+    ]);
 
-        // Create dashboard notifications for each member
-        const title = `New Bidding Cycle - ${cycle.group_name}`;
-        const message = `Bidding for ₹${cycle.total_pool_amount} starts on ${biddingDate} at ${biddingTime}. Ends at ${biddingEndTime}`;
-        const stmt = db.prepare('INSERT INTO notifications (user_id, cycle_id, type, title, message) VALUES (?, ?, ?, ?, ?)');
-        members.forEach(member => {
-          stmt.run([member.user_id, cycleId, 'bidding_cycle', title, message]);
-        });
-        stmt.finalize((err) => {
-          if (err) {
-            console.error('Error creating notifications:', err);
-            return reject(err);
-          }
+    // Get user details for each member
+    const membersWithDetails = await Promise.all(members.map(async (member) => {
+      const user = await db.getById('users', member.user_id);
+      return {
+        user_id: member.user_id,
+        phone: user ? user.phone : null,
+        email: user ? user.email : null,
+        full_name: user ? user.full_name : null
+      };
+    }));
 
-          // Send WhatsApp notifications (placeholder)
-          members.forEach(member => {
-            if (member.phone) {
-              sendWhatsAppNotification(member.phone, {
-                type: 'bidding_cycle',
-                groupName: cycle.group_name,
-                amount: cycle.total_pool_amount,
-                startDate: biddingDate,
-                startTime: biddingTime,
-                endTime: biddingEndTime
-              });
-            }
-          });
+    // Format dates
+    const biddingDate = new Date(cycle.bidding_start_date).toLocaleDateString();
+    const biddingTime = new Date(cycle.bidding_start_date).toLocaleTimeString();
+    const biddingEndTime = new Date(cycle.bidding_end_date).toLocaleTimeString();
 
-          // Send email notifications (placeholder)
-          sendEmailNotification(members.map(m => m.user_id), {
-            subject: `New Bidding Cycle - ${cycle.group_name}`,
-            body: `A new bidding cycle has been scheduled.\n\nGroup: ${cycle.group_name}\nAmount: ₹${cycle.total_pool_amount}\nStart: ${biddingDate} at ${biddingTime}\nEnd: ${biddingEndTime}\n\nPlease log in to place your bid.`
-          });
+    // Create dashboard notifications for each member
+    const title = `New Bidding Cycle - ${group.name}`;
+    const message = `Bidding for ₹${cycle.total_pool_amount} starts on ${biddingDate} at ${biddingTime}. Ends at ${biddingEndTime}`;
 
-          // Send push notifications (placeholder)
-          sendPushNotification(members.map(m => m.user_id), {
-            title: 'New Bidding Cycle',
-            body: `Bidding for ₹${cycle.total_pool_amount} starts on ${biddingDate} at ${biddingTime}`
-          });
+    const firestore = require('../config/database').getFirestore();
+    const batch = firestore.batch();
 
-          resolve({ notified: members.length });
-        });
+    membersWithDetails.forEach(member => {
+      const notificationRef = firestore.collection('notifications').doc();
+      batch.set(notificationRef, {
+        user_id: member.user_id,
+        cycle_id: cycleId,
+        type: 'bidding_cycle',
+        title,
+        message,
+        is_read: false,
+        created_at: admin.firestore.FieldValue.serverTimestamp(),
       });
     });
-  });
+
+    await batch.commit();
+
+    // Send WhatsApp notifications (placeholder)
+    membersWithDetails.forEach(member => {
+      if (member.phone) {
+        sendWhatsAppNotification(member.phone, {
+          type: 'bidding_cycle',
+          groupName: group.name,
+          amount: cycle.total_pool_amount,
+          startDate: biddingDate,
+          startTime: biddingTime,
+          endTime: biddingEndTime
+        });
+      }
+    });
+
+    // Send email notifications (placeholder)
+    sendEmailNotification(membersWithDetails.map(m => m.user_id), {
+      subject: `New Bidding Cycle - ${group.name}`,
+      body: `A new bidding cycle has been scheduled.\n\nGroup: ${group.name}\nAmount: ₹${cycle.total_pool_amount}\nStart: ${biddingDate} at ${biddingTime}\nEnd: ${biddingEndTime}\n\nPlease log in to place your bid.`
+    });
+
+    // Send push notifications (placeholder)
+    sendPushNotification(membersWithDetails.map(m => m.user_id), {
+      title: 'New Bidding Cycle',
+      body: `Bidding for ₹${cycle.total_pool_amount} starts on ${biddingDate} at ${biddingTime}`
+    });
+
+    return { notified: membersWithDetails.length };
+  } catch (error) {
+    console.error('Error in notifyBiddingCycle:', error);
+    throw error;
+  }
 };
 
 // Send winner notification
 const sendWinnerNotification = async (winnerUserId, cycleId, payoutAmount, isRandomWinner) => {
-  const db = getDb();
-  
-  return new Promise((resolve, reject) => {
+  try {
     // Get winner details with group info from cycle
-    db.get(`
-      SELECT u.id, u.phone, u.email, u.full_name, bg.name as group_name, bg.id as group_id, bc.cycle_number
-      FROM users u
-      INNER JOIN bidding_cycles bc ON bc.id = ?
-      INNER JOIN bhishi_groups bg ON bg.id = bc.group_id
-      WHERE u.id = ?
-    `, [cycleId, winnerUserId], (err, winner) => {
-      if (err || !winner) {
-        console.error('Error fetching winner:', err);
-        return reject(err || new Error('Winner not found'));
-      }
+    const cycle = await db.getById('bidding_cycles', cycleId);
+    if (!cycle) {
+      throw new Error('Cycle not found');
+    }
 
-      // Create dashboard notification for winner
-      const title = `🎉 You Won! - ${winner.group_name}`;
-      const message = isRandomWinner 
-        ? `Congratulations! You won the bidding cycle #${winner.cycle_number} for ${winner.group_name} (Random selection - no bids). You will receive ₹${payoutAmount.toFixed(2)}. Please complete agreement signing and video verification.`
-        : `Congratulations! You won the bidding cycle #${winner.cycle_number} for ${winner.group_name}! You will receive ₹${payoutAmount.toFixed(2)}. Please complete agreement signing and video verification.`;
-      
-      db.run('INSERT INTO notifications (user_id, cycle_id, type, title, message) VALUES (?, ?, ?, ?, ?)',
-        [winnerUserId, cycleId, 'winner', title, message], (err) => {
-          if (err) {
-            console.error('Error creating winner notification:', err);
-          }
-        });
+    const group = await db.getById('bhishi_groups', cycle.group_id);
+    if (!group) {
+      throw new Error('Group not found');
+    }
 
-      // Send WhatsApp notification to winner
-      if (winner.phone) {
-        sendWhatsAppNotification(winner.phone, {
-          type: 'winner',
-          groupName: winner.group_name,
-          payoutAmount: payoutAmount,
-          cycleNumber: winner.cycle_number
-        });
-      }
+    const winner = await db.getById('users', winnerUserId);
+    if (!winner) {
+      throw new Error('Winner not found');
+    }
 
-      // Send email to winner
-      sendEmailNotification([winner.id], {
-        subject: `You Won! - ${winner.group_name} Cycle #${winner.cycle_number}`,
-        body: message
-      });
-
-      // Send push notification to winner
-      sendPushNotification([winner.id], {
-        title: '🎉 You Won!',
-        body: `You won ₹${payoutAmount.toFixed(2)} for ${winner.group_name}`
-      });
-
-      resolve({ notified: true });
+    // Create dashboard notification for winner
+    const title = `🎉 You Won! - ${group.name}`;
+    const message = isRandomWinner 
+      ? `Congratulations! You won the bidding cycle #${cycle.cycle_number} for ${group.name} (Random selection - no bids). You will receive ₹${payoutAmount.toFixed(2)}. Please complete agreement signing and video verification.`
+      : `Congratulations! You won the bidding cycle #${cycle.cycle_number} for ${group.name}! You will receive ₹${payoutAmount.toFixed(2)}. Please complete agreement signing and video verification.`;
+    
+    await db.create('notifications', {
+      user_id: winnerUserId,
+      cycle_id: cycleId,
+      type: 'winner',
+      title,
+      message,
+      is_read: false,
     });
-  });
+
+    // Send WhatsApp notification to winner
+    if (winner.phone) {
+      sendWhatsAppNotification(winner.phone, {
+        type: 'winner',
+        groupName: group.name,
+        payoutAmount: payoutAmount,
+        cycleNumber: cycle.cycle_number
+      });
+    }
+
+    // Send email to winner
+    sendEmailNotification([winner.id], {
+      subject: `You Won! - ${group.name} Cycle #${cycle.cycle_number}`,
+      body: message
+    });
+
+    // Send push notification to winner
+    sendPushNotification([winner.id], {
+      title: '🎉 You Won!',
+      body: `You won ₹${payoutAmount.toFixed(2)} for ${group.name}`
+    });
+
+    return { notified: true };
+  } catch (error) {
+    console.error('Error in sendWinnerNotification:', error);
+    throw error;
+  }
 };
 
 // Send payment notifications after profit calculation
 const sendPaymentNotifications = async (groupId, cycleId, payableAmount, earnedAmount) => {
-  const db = getDb();
-  
-  return new Promise((resolve, reject) => {
+  try {
     // Get all group members with their contact info
-    db.all(`
-      SELECT gm.user_id, u.phone, u.email, u.full_name, bg.name as group_name
-      FROM group_members gm
-      INNER JOIN users u ON gm.user_id = u.id
-      INNER JOIN bhishi_groups bg ON gm.group_id = bg.id
-      WHERE gm.group_id = ?
-    `, [groupId], (err, members) => {
-      if (err) {
-        console.error('Error fetching members for notifications:', err);
-        return reject(err);
-      }
+    const members = await db.getAll('group_members', [
+      { field: 'group_id', operator: '==', value: groupId }
+    ]);
+
+    const group = await db.getById('bhishi_groups', groupId);
+    if (!group) {
+      throw new Error('Group not found');
+    }
+
+    // Get user details for each member
+    const membersWithDetails = await Promise.all(members.map(async (member) => {
+      const user = await db.getById('users', member.user_id);
+      return {
+        user_id: member.user_id,
+        phone: user ? user.phone : null,
+        email: user ? user.email : null,
+        full_name: user ? user.full_name : null,
+        group_name: group.name
+      };
+    }));
 
     // Create dashboard notifications
-    const title = `Payment Due - ${members[0]?.group_name || 'Bhishi Group'}`;
-    const stmt = db.prepare('INSERT INTO notifications (user_id, cycle_id, type, title, message) VALUES (?, ?, ?, ?, ?)');
-    members.forEach(member => {
+    const title = `Payment Due - ${group.name}`;
+    const firestore = require('../config/database').getFirestore();
+    const batch = firestore.batch();
+
+    membersWithDetails.forEach(member => {
       let message;
       if (earnedAmount > 0) {
         message = `Payment due: ₹${payableAmount.toFixed(2)}. You earned ₹${earnedAmount.toFixed(2)} as profit share.`;
       } else {
         message = `Payment due: ₹${payableAmount.toFixed(2)} (No bids placed - full amount).`;
       }
-      stmt.run([member.user_id, cycleId, 'payment_due', title, message]);
+
+      const notificationRef = firestore.collection('notifications').doc();
+      batch.set(notificationRef, {
+        user_id: member.user_id,
+        cycle_id: cycleId,
+        type: 'payment_due',
+        title,
+        message,
+        is_read: false,
+        created_at: admin.firestore.FieldValue.serverTimestamp(),
+      });
     });
-    stmt.finalize();
+
+    await batch.commit();
 
     // Send WhatsApp notifications (placeholder)
-    members.forEach(member => {
+    membersWithDetails.forEach(member => {
       if (member.phone) {
         sendWhatsAppNotification(member.phone, {
           type: 'payment_due',
@@ -189,24 +219,26 @@ const sendPaymentNotifications = async (groupId, cycleId, payableAmount, earnedA
     });
 
     // Send email notifications
-    sendEmailNotification(members.map(m => m.user_id), {
-      subject: `Payment Due - ${members[0]?.group_name || 'Bhishi Group'}`,
+    sendEmailNotification(membersWithDetails.map(m => m.user_id), {
+      subject: `Payment Due - ${group.name}`,
       body: earnedAmount > 0 
         ? `Your payment of ₹${payableAmount.toFixed(2)} is due. You earned ₹${earnedAmount.toFixed(2)} as profit share.`
         : `Your payment of ₹${payableAmount.toFixed(2)} is due (No bids were placed).`
     });
 
     // Send push notifications
-    sendPushNotification(members.map(m => m.user_id), {
+    sendPushNotification(membersWithDetails.map(m => m.user_id), {
       title: 'Payment Due',
       body: earnedAmount > 0 
         ? `Pay ₹${payableAmount.toFixed(2)}. You earned ₹${earnedAmount.toFixed(2)}!`
         : `Pay ₹${payableAmount.toFixed(2)}`
-      });
-      
-      resolve({ notified: members.length });
     });
-  });
+      
+    return { notified: membersWithDetails.length };
+  } catch (error) {
+    console.error('Error in sendPaymentNotifications:', error);
+    throw error;
+  }
 };
 
 // Send WhatsApp notification (placeholder)

@@ -6,7 +6,15 @@ require('dotenv').config();
 const app = express();
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: [
+    'http://localhost:3000', // Local development
+    process.env.FRONTEND_URL, // Production frontend URL
+    /\.web\.app$/, // Firebase Hosting domains
+    /\.firebaseapp\.com$/ // Firebase Hosting alternate domains
+  ].filter(Boolean),
+  credentials: true
+}));
 app.use(express.json());
 
 // Database initialization
@@ -29,6 +37,10 @@ app.get('/api/health', (req, res) => {
 
 const PORT = process.env.PORT || 5005;
 
+// Note: Database now uses Firestore (Firebase)
+// Local: Uses Firebase Emulator (set FIREBASE_USE_EMULATOR=true)
+// Production: Uses Firebase Cloud (set FIREBASE_SERVICE_ACCOUNT_KEY)
+
 // Initialize database and start server
 db.initDatabase().then(() => {
   app.listen(PORT, () => {
@@ -36,27 +48,21 @@ db.initDatabase().then(() => {
     
     // Set up automatic cycle closing - check every 10 seconds for immediate processing
     const { closeBiddingCycle } = require('./routes/bidding');
-    const { getDb } = require('./config/database');
+    const { db } = require('./config/database');
     
     // Function to check and close expired cycles
-    const checkAndCloseExpiredCycles = () => {
-      const db = getDb();
-      const now = new Date();
-      const nowISO = now.toISOString();
-      const nowLocal = now.toISOString().slice(0, 16); // Format: YYYY-MM-DDTHH:mm
-      
-      console.log(`[Scheduler] Checking for expired cycles at ${nowISO} (local: ${nowLocal})...`);
-      
-      // Get all open cycles and check if they've expired
-      db.all(`
-        SELECT id, group_id, bidding_end_date, status
-        FROM bidding_cycles
-        WHERE status = 'open'
-      `, [], (err, allOpenCycles) => {
-        if (err) {
-          console.error('[Scheduler] Error fetching open cycles:', err);
-          return;
-        }
+    const checkAndCloseExpiredCycles = async () => {
+      try {
+        const now = new Date();
+        const nowISO = now.toISOString();
+        const nowLocal = now.toISOString().slice(0, 16); // Format: YYYY-MM-DDTHH:mm
+        
+        console.log(`[Scheduler] Checking for expired cycles at ${nowISO} (local: ${nowLocal})...`);
+        
+        // Get all open cycles
+        const allOpenCycles = await db.getAll('bidding_cycles', [
+          { field: 'status', operator: '==', value: 'open' }
+        ]);
 
         if (allOpenCycles.length === 0) {
           return; // No open cycles
@@ -82,29 +88,31 @@ db.initDatabase().then(() => {
 
         // Process all cycles sequentially to avoid race conditions
         let processed = 0;
-        cyclesToClose.forEach((cycle) => {
-          console.log(`[Scheduler] Attempting to close cycle ${cycle.id} (ended at ${cycle.bidding_end_date})...`);
-          closeBiddingCycle(cycle.id)
-            .then((result) => {
-              processed++;
-              console.log(`[Scheduler] ✓ Successfully closed cycle ${cycle.id}:`, result.message);
-              if (result.winner) {
-                console.log(`[Scheduler]   Winner: User ${result.winner.userId}, Bid: ₹${result.winner.bidAmount}`);
-              }
-              if (processed === cyclesToClose.length) {
-                console.log(`[Scheduler] All ${cyclesToClose.length} cycle(s) processed successfully`);
-              }
-            })
-            .catch((closeError) => {
-              processed++;
-              console.error(`[Scheduler] ✗ Failed to close cycle ${cycle.id}:`, closeError.message);
-              console.error(`[Scheduler] Full error:`, closeError);
-              if (closeError.stack) {
-                console.error(`[Scheduler] Stack trace:`, closeError.stack);
-              }
-            });
-        });
-      });
+        for (const cycle of cyclesToClose) {
+          try {
+            console.log(`[Scheduler] Attempting to close cycle ${cycle.id} (ended at ${cycle.bidding_end_date})...`);
+            const result = await closeBiddingCycle(cycle.id);
+            processed++;
+            console.log(`[Scheduler] ✓ Successfully closed cycle ${cycle.id}:`, result.message);
+            if (result.winner) {
+              console.log(`[Scheduler]   Winner: User ${result.winner.userId}, Bid: ₹${result.winner.bidAmount}`);
+            }
+          } catch (closeError) {
+            processed++;
+            console.error(`[Scheduler] ✗ Failed to close cycle ${cycle.id}:`, closeError.message);
+            console.error(`[Scheduler] Full error:`, closeError);
+            if (closeError.stack) {
+              console.error(`[Scheduler] Stack trace:`, closeError.stack);
+            }
+          }
+        }
+        
+        if (processed === cyclesToClose.length) {
+          console.log(`[Scheduler] All ${cyclesToClose.length} cycle(s) processed`);
+        }
+      } catch (error) {
+        console.error('[Scheduler] Error checking expired cycles:', error);
+      }
     };
     
     // Run immediately on server start to catch any cycles that expired while server was down

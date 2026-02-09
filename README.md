@@ -1,5 +1,28 @@
 # Bhishi Management System
 
+A comprehensive Chit Fund (Bhishi) Management System with bidding, profit distribution, and user management features.
+
+## 📚 Quick Links
+
+- **[🚀 Quick Start Guide](QUICK_START.md)** - Daily development startup (local & production)
+- **[🚀 Deployment Guide](DEPLOY_CHANGES.md)** - How to deploy changes to production
+- **[🔧 CI/CD Setup](CI_CD_SETUP.md)** - Set up automatic deployments
+- **[📖 Complete Deployment Guide](DEPLOYMENT_GUIDE.md)** - Full setup from scratch
+
+## 🚀 Quick Start
+
+### Local Development
+See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) - Part 1: Local Development Setup
+
+### Production Deployment
+See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) - Part 2: Production Deployment
+
+---
+
+## 📚 Documentation
+
+- **Complete Deployment Guide**: [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) - Everything you need for local and production setup
+
 A comprehensive web application for managing Bhishi (Chit Fund) groups where members contribute fixed amounts periodically, and winners are selected through a bidding process.
 
 ## Features
@@ -21,7 +44,7 @@ A comprehensive web application for managing Bhishi (Chit Fund) groups where mem
 
 ### Backend
 - Node.js with Express.js
-- SQLite Database
+- Firestore Database (Firebase)
 - JWT Authentication
 - bcryptjs for password hashing
 
@@ -63,14 +86,15 @@ A comprehensive web application for managing Bhishi (Chit Fund) groups where mem
    npm install
    ```
 
-3. **Configure environment variables**
+3. **Set up local development**
    
-   Create a `.env` file in the `backend` directory:
-   ```env
-   PORT=5005
-   JWT_SECRET=your-secret-key-change-in-production
-   NODE_ENV=development
-   ```
+   See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for complete local setup instructions.
+   
+   Quick start:
+   - Install Firebase CLI: `npm install -g firebase-tools`
+   - Initialize emulator: `firebase init emulators`
+   - Start emulator: `firebase emulators:start --only firestore`
+   - Create `backend/.env` with Firestore emulator config
 
 4. **Start the development servers**
    
@@ -170,7 +194,7 @@ bhishi/
 
 ## Database Schema
 
-The system uses SQLite with the following main tables:
+The system uses Firestore (Firebase) with the following collections:
 - `users` - User accounts and authentication
 - `bhishi_groups` - Group information
 - `group_members` - Group membership
@@ -178,6 +202,13 @@ The system uses SQLite with the following main tables:
 - `bids` - Individual bids placed by users
 - `contributions` - Member contributions per cycle
 - `disputes` - User disputes and resolutions
+- `notifications` - User notifications
+- `agreements` - Signed agreements
+- `video_verifications` - Video verification records
+- `profit_distributions` - Profit distribution records
+
+**Local Development**: Uses Firebase Emulator (no account needed)
+**Production**: Uses Firebase Cloud Firestore
 
 ## API Endpoints
 
@@ -228,8 +259,9 @@ The system uses SQLite with the following main tables:
 ## Troubleshooting
 
 ### Database Issues
-- Ensure the `backend/data/` directory exists
-- Check file permissions for database file
+- **Local**: Ensure Firestore emulator is running
+- **Production**: Check Firestore security rules and service account permissions
+- See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for detailed troubleshooting
 
 ### Port Already in Use
 - Change PORT in backend `.env` file
