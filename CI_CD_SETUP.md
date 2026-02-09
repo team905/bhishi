@@ -31,9 +31,23 @@ You need to add these secrets to your GitHub repository:
 - **How to get:**
   1. Go to [Google Cloud Console](https://console.cloud.google.com/iam-admin/serviceaccounts)
   2. Select your project
-  3. Create or select a service account
-  4. Go to **Keys** tab → **Add Key** → **Create New Key** → **JSON**
-  5. Copy the entire JSON content
+  3. **Create a new service account** (or use existing):
+     - Click **"Create Service Account"**
+     - Name: `github-actions-deployer`
+     - Description: `Service account for GitHub Actions CI/CD`
+     - Click **"Create and Continue"**
+  4. **Grant required roles:**
+     - `Cloud Build Service Account` (or `Cloud Build Editor`)
+     - `Cloud Run Admin`
+     - `Service Account User`
+     - `Storage Admin` (for Cloud Build artifacts)
+     - `Firebase Admin SDK Administrator Service Agent`
+     - Click **"Continue"** → **"Done"**
+  5. **Create and download key:**
+     - Click on the created service account
+     - Go to **Keys** tab → **Add Key** → **Create New Key** → **JSON**
+     - Download the JSON file
+  6. **Copy the entire JSON content** and paste it as the secret value
 
 #### GCP_PROJECT_ID
 - **Name:** `GCP_PROJECT_ID`
@@ -137,12 +151,34 @@ You can also trigger deployment manually:
 
 ## 🐛 Troubleshooting
 
-### Deployment Fails: "Permission denied"
+### Deployment Fails: "Permission denied" or "PERMISSION_DENIED"
 
-**Solution:** Check service account permissions:
-- Cloud Run Admin
-- Cloud Build Service Account
-- Firebase Admin SDK Administrator Service Agent
+**Error:** `PERMISSION_DENIED: The caller does not have permission`
+
+**Solution:** The service account needs these roles:
+
+1. **Go to [IAM & Admin → Service Accounts](https://console.cloud.google.com/iam-admin/serviceaccounts)**
+2. **Find your service account** (the one used in `GCP_SA_KEY` secret)
+3. **Click on it** → Go to **"Permissions"** tab
+4. **Click "Grant Access"** and add these roles:
+   - ✅ `Cloud Build Service Account` (or `Cloud Build Editor`)
+   - ✅ `Cloud Run Admin`
+   - ✅ `Service Account User`
+   - ✅ `Storage Admin` (required for Cloud Build to upload artifacts)
+   - ✅ `Firebase Admin SDK Administrator Service Agent`
+
+5. **Also grant permissions to Cloud Build service account:**
+   - Go to [IAM & Admin → IAM](https://console.cloud.google.com/iam-admin/iam)
+   - Find `[PROJECT-NUMBER]@cloudbuild.gserviceaccount.com`
+   - Click **"Edit"** (pencil icon)
+   - Add role: `Cloud Run Admin` (so Cloud Build can deploy to Cloud Run)
+   - Add role: `Service Account User` (so Cloud Build can use service accounts)
+
+6. **Wait 1-2 minutes** for permissions to propagate
+
+7. **Retry the deployment** by pushing to `firebase` branch again
+
+**See [FIX_PERMISSIONS.md](./FIX_PERMISSIONS.md) for detailed step-by-step instructions.**
 
 ### Deployment Fails: "Secret not found"
 
