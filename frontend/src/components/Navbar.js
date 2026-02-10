@@ -11,9 +11,21 @@ function Navbar() {
   useEffect(() => {
     if (user && user.role === 'user') {
       fetchUnreadCount();
-      // Poll for new notifications every 30 seconds
-      const interval = setInterval(fetchUnreadCount, 30000);
-      return () => clearInterval(interval);
+      
+      // Listen for notification updates (triggered when notifications change)
+      const handleNotificationUpdate = () => {
+        fetchUnreadCount();
+      };
+      
+      window.addEventListener('notificationUpdate', handleNotificationUpdate);
+      
+      // Poll for new notifications every 60 seconds (reduced frequency)
+      const interval = setInterval(fetchUnreadCount, 60000);
+      
+      return () => {
+        clearInterval(interval);
+        window.removeEventListener('notificationUpdate', handleNotificationUpdate);
+      };
     }
   }, [user]);
 

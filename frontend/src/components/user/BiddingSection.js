@@ -53,6 +53,8 @@ function BiddingSection({ cycles, myBids, onBidPlaced }) {
       setShowBidModal(false);
       fetchCycles();
       if (onBidPlaced) onBidPlaced();
+      // Trigger dashboard refresh event
+      window.dispatchEvent(new CustomEvent('dashboardRefresh'));
       setTimeout(() => setMessage({ type: '', text: '' }), 3000);
     } catch (error) {
       setMessage({ type: 'error', text: error.response?.data?.error || 'Failed to place bid' });

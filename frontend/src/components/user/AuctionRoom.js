@@ -81,11 +81,6 @@ function AuctionRoom() {
 
   useEffect(() => {
     fetchCycleData();
-    
-    // Set up polling for live updates every 3 seconds
-    pollIntervalRef.current = setInterval(() => {
-      fetchBids();
-    }, 3000);
 
     // Set up countdown timer
     const timerInterval = setInterval(() => {
@@ -93,10 +88,45 @@ function AuctionRoom() {
     }, 1000);
 
     return () => {
-      clearInterval(pollIntervalRef.current);
       clearInterval(timerInterval);
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
     };
-  }, [cycleId, fetchCycleData, fetchBids, updateCountdown]);
+  }, [cycleId, fetchCycleData, updateCountdown]);
+
+  // Smart polling: only poll when cycle is active and bidding is open
+  useEffect(() => {
+    if (!cycle) return;
+
+    // Check if bidding is open (inline logic to avoid dependency issues)
+    const now = new Date();
+    const start = new Date(cycle.bidding_start_date);
+    const end = new Date(cycle.bidding_end_date);
+    const isActive = now >= start && now <= end;
+    
+    if (isActive) {
+      // Only poll when bidding is active
+      pollIntervalRef.current = setInterval(() => {
+        fetchBids();
+      }, 5000); // Reduced from 3s to 5s to reduce load
+    } else {
+      // Stop polling when cycle is closed
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      // Fetch once when cycle closes to get final state
+      fetchBids();
+    }
+
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+  }, [cycle, fetchBids]);
 
   useEffect(() => {
     if (bidsEndRef.current) {
@@ -136,6 +166,9 @@ function AuctionRoom() {
       
       // Refresh bids immediately
       await fetchBids();
+      
+      // Trigger dashboard refresh event
+      window.dispatchEvent(new CustomEvent('dashboardRefresh'));
       
       // Clear success message after 3 seconds
       setTimeout(() => setSuccess(''), 3000);

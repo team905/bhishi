@@ -21,25 +21,36 @@ function UserDashboard() {
   useEffect(() => {
     fetchDashboardData();
     
-    // Auto-refresh dashboard every 5 seconds to catch cycle closures and updates
-    const refreshInterval = setInterval(() => {
-      fetchDashboardData();
-    }, 5000);
-    
     // Listen for notification click from navbar
     const handleShowNotifications = () => {
       setActiveTab('notifications');
     };
+    
+    // Listen for dashboard refresh events (triggered by bid placements, payments, etc.)
+    const handleDashboardRefresh = () => {
+      fetchDashboardData();
+    };
+    
+    // Listen for window focus (user returns to tab) - refresh once
+    const handleWindowFocus = () => {
+      fetchDashboardData();
+    };
+    
     window.addEventListener('showNotifications', handleShowNotifications);
+    window.addEventListener('dashboardRefresh', handleDashboardRefresh);
+    window.addEventListener('focus', handleWindowFocus);
     
     return () => {
-      clearInterval(refreshInterval);
       window.removeEventListener('showNotifications', handleShowNotifications);
+      window.removeEventListener('dashboardRefresh', handleDashboardRefresh);
+      window.removeEventListener('focus', handleWindowFocus);
     };
   }, []);
 
-  const fetchDashboardData = async () => {
-    setLoading(true);
+  const fetchDashboardData = async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const response = await axios.get('/api/users/dashboard', {
         headers: {
@@ -189,25 +200,41 @@ function UserDashboard() {
         <div className="user-tabs">
           <button
             className={`tab-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
-            onClick={() => setActiveTab('dashboard')}
+            onClick={() => {
+              setActiveTab('dashboard');
+              // Refresh data when switching to dashboard tab
+              fetchDashboardData(true); // Silent refresh
+            }}
           >
             <span className="icon">🎯</span> Active Bidding
           </button>
           <button
             className={`tab-btn ${activeTab === 'groups' ? 'active' : ''}`}
-            onClick={() => setActiveTab('groups')}
+            onClick={() => {
+              setActiveTab('groups');
+              // Refresh data when switching tabs
+              fetchDashboardData(true); // Silent refresh
+            }}
           >
             <span className="icon">👥</span> My Groups
           </button>
           <button
             className={`tab-btn ${activeTab === 'contributions' ? 'active' : ''}`}
-            onClick={() => setActiveTab('contributions')}
+            onClick={() => {
+              setActiveTab('contributions');
+              // Refresh data when switching tabs
+              fetchDashboardData(true); // Silent refresh
+            }}
           >
             <span className="icon">💳</span> Contributions
           </button>
           <button
             className={`tab-btn ${activeTab === 'financial' ? 'active' : ''}`}
-            onClick={() => setActiveTab('financial')}
+            onClick={() => {
+              setActiveTab('financial');
+              // Refresh data when switching tabs
+              fetchDashboardData(true); // Silent refresh
+            }}
           >
             <span className="icon">📊</span> Financial Summary
           </button>

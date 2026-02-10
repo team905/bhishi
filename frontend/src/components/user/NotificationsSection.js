@@ -22,9 +22,42 @@ function NotificationsSection() {
 
   useEffect(() => {
     fetchNotifications();
-    // Poll for new notifications every 30 seconds
-    const interval = setInterval(fetchNotifications, 30000);
-    return () => clearInterval(interval);
+    
+    // Listen for notification update events
+    const handleNotificationUpdate = () => {
+      fetchNotifications();
+    };
+    
+    window.addEventListener('notificationUpdate', handleNotificationUpdate);
+    
+    // Poll for new notifications every 60 seconds (reduced frequency, only when tab is active)
+    let interval = null;
+    const startPolling = () => {
+      if (document.visibilityState === 'visible') {
+        interval = setInterval(fetchNotifications, 60000);
+      }
+    };
+    
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchNotifications(); // Refresh immediately when tab becomes visible
+        startPolling();
+      } else {
+        if (interval) {
+          clearInterval(interval);
+          interval = null;
+        }
+      }
+    };
+    
+    startPolling();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      if (interval) clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('notificationUpdate', handleNotificationUpdate);
+    };
   }, [filter, fetchNotifications]);
 
   const markAsRead = async (notificationId) => {
@@ -34,6 +67,8 @@ function NotificationsSection() {
       setNotifications(notifications.map(n => 
         n.id === notificationId ? { ...n, is_read: 1 } : n
       ));
+      // Trigger notification update event for navbar
+      window.dispatchEvent(new CustomEvent('notificationUpdate'));
     } catch (error) {
       console.error('Failed to mark notification as read:', error);
     }
@@ -48,6 +83,8 @@ function NotificationsSection() {
         )
       );
       setNotifications(notifications.map(n => ({ ...n, is_read: 1 })));
+      // Trigger notification update event for navbar
+      window.dispatchEvent(new CustomEvent('notificationUpdate'));
     } catch (error) {
       console.error('Failed to mark all as read:', error);
     }
