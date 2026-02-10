@@ -1,17 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
 function MonthlyBiddingHistory({ groupId }) {
   const [groupDetails, setGroupDetails] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (groupId) {
-      fetchGroupDetails();
-    }
-  }, [groupId]);
-
-  const fetchGroupDetails = async () => {
+  const fetchGroupDetails = useCallback(async () => {
     try {
       const response = await axios.get(`/api/bhishi/groups/${groupId}`);
       setGroupDetails(response.data);
@@ -20,7 +14,13 @@ function MonthlyBiddingHistory({ groupId }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [groupId]);
+
+  useEffect(() => {
+    if (groupId) {
+      fetchGroupDetails();
+    }
+  }, [groupId, fetchGroupDetails]);
 
   if (loading) return <div className="loading">Loading monthly history...</div>;
   if (!groupDetails) return <div className="empty-state">Group not found</div>;
@@ -43,7 +43,8 @@ function MonthlyBiddingHistory({ groupId }) {
     return acc;
   }, {});
 
-  // Get payment status for each member for each cycle
+  // Get payment status for each member for each cycle (kept for potential future use)
+  // eslint-disable-next-line no-unused-vars
   const getPaymentStatus = async (cycleId) => {
     try {
       const response = await axios.get(`/api/bhishi/groups/${groupId}/cycles/${cycleId}/payments`);
@@ -112,11 +113,7 @@ function MonthlyCycleCard({ month, cycles, groupId, members, contributionAmount 
   const [paymentStatuses, setPaymentStatuses] = useState({});
   const [loadingPayments, setLoadingPayments] = useState(true);
 
-  useEffect(() => {
-    fetchAllPaymentStatuses();
-  }, [cycles]);
-
-  const fetchAllPaymentStatuses = async () => {
+  const fetchAllPaymentStatuses = useCallback(async () => {
     const statuses = {};
     for (const cycle of cycles) {
       try {
@@ -129,7 +126,11 @@ function MonthlyCycleCard({ month, cycles, groupId, members, contributionAmount 
     }
     setPaymentStatuses(statuses);
     setLoadingPayments(false);
-  };
+  }, [cycles, groupId]);
+
+  useEffect(() => {
+    fetchAllPaymentStatuses();
+  }, [fetchAllPaymentStatuses]);
 
   return (
     <div className="card" style={{ border: '2px solid #e0e0e0' }}>

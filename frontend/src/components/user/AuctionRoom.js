@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import axios from 'axios';
@@ -36,7 +36,7 @@ function AuctionRoom() {
       clearInterval(pollIntervalRef.current);
       clearInterval(timerInterval);
     };
-  }, [cycleId]);
+  }, [cycleId, fetchCycleData, fetchBids, updateCountdown]);
 
   useEffect(() => {
     if (bidsEndRef.current) {
@@ -44,7 +44,44 @@ function AuctionRoom() {
     }
   }, [bids]);
 
-  const fetchCycleData = async () => {
+  const fetchBids = useCallback(async () => {
+    try {
+      const response = await axios.get(`/api/bidding/cycles/${cycleId}/bids`);
+      const sortedBids = response.data.sort((a, b) => {
+        if (a.bid_amount !== b.bid_amount) {
+          return a.bid_amount - b.bid_amount; // Sort by amount (lowest first)
+        }
+        return new Date(a.bid_time) - new Date(b.bid_time); // Then by time
+      });
+      setBids(sortedBids);
+    } catch (error) {
+      console.error('Error fetching bids:', error);
+    }
+  }, [cycleId]);
+
+  const updateCountdown = useCallback(() => {
+    setCycle(currentCycle => {
+      if (!currentCycle) return currentCycle;
+
+      const now = new Date();
+      const endDate = new Date(currentCycle.bidding_end_date);
+      const diff = endDate - now;
+
+      if (diff <= 0) {
+        setTimeRemaining({ ended: true });
+        return currentCycle;
+      }
+
+      const hours = Math.floor(diff / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+      setTimeRemaining({ hours, minutes, seconds, ended: false });
+      return currentCycle;
+    });
+  }, []);
+
+  const fetchCycleData = useCallback(async () => {
     try {
       const response = await axios.get(`/api/bidding/cycles`);
       const cycleData = response.data.find(c => c.id === parseInt(cycleId));
@@ -66,41 +103,7 @@ function AuctionRoom() {
       setError('Failed to load auction room');
       setLoading(false);
     }
-  };
-
-  const fetchBids = async () => {
-    try {
-      const response = await axios.get(`/api/bidding/cycles/${cycleId}/bids`);
-      const sortedBids = response.data.sort((a, b) => {
-        if (a.bid_amount !== b.bid_amount) {
-          return a.bid_amount - b.bid_amount; // Sort by amount (lowest first)
-        }
-        return new Date(a.bid_time) - new Date(b.bid_time); // Then by time
-      });
-      setBids(sortedBids);
-    } catch (error) {
-      console.error('Error fetching bids:', error);
-    }
-  };
-
-  const updateCountdown = () => {
-    if (!cycle) return;
-
-    const now = new Date();
-    const endDate = new Date(cycle.bidding_end_date);
-    const diff = endDate - now;
-
-    if (diff <= 0) {
-      setTimeRemaining({ ended: true });
-      return;
-    }
-
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-
-    setTimeRemaining({ hours, minutes, seconds, ended: false });
-  };
+  }, [cycleId, fetchBids, updateCountdown]);
 
   const handlePlaceBid = async (e) => {
     e.preventDefault();
@@ -161,10 +164,6 @@ function AuctionRoom() {
     return bids[0];
   };
 
-  // User bids the amount they want to receive (no calculation needed)
-  const getPayoutAmount = (bidAmt) => {
-    return bidAmt; // Bid amount = payout amount
-  };
 
   if (loading) {
     return <div className="auction-room-loading">Loading auction room...</div>;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
 function NotificationsSection() {
@@ -6,14 +6,7 @@ function NotificationsSection() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('unread'); // 'all', 'unread' - default to unread
 
-  useEffect(() => {
-    fetchNotifications();
-    // Poll for new notifications every 30 seconds
-    const interval = setInterval(fetchNotifications, 30000);
-    return () => clearInterval(interval);
-  }, [filter]);
-
-  const fetchNotifications = async () => {
+  const fetchNotifications = useCallback(async () => {
     try {
       const url = filter === 'unread' 
         ? '/api/users/notifications?unreadOnly=true'

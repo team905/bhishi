@@ -193,6 +193,7 @@ function GroupsManagement() {
     }
   };
 
+  // eslint-disable-next-line no-unused-vars
   const handleRemoveMember = async (groupId, userId) => {
     if (!window.confirm('Are you sure you want to remove this member?')) return;
 

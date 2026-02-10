@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import axios from 'axios';
@@ -7,7 +7,6 @@ import './WinnerVerification.css';
 function WinnerVerification() {
   const { cycleId } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
   const [cycle, setCycle] = useState(null);
   const [agreement, setAgreement] = useState(null);
   const [verification, setVerification] = useState(null);
@@ -18,11 +17,7 @@ function WinnerVerification() {
   const [videoUrl, setVideoUrl] = useState('');
   const [activeTab, setActiveTab] = useState('agreement');
 
-  useEffect(() => {
-    fetchData();
-  }, [cycleId]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       const [agreementRes, verificationRes] = await Promise.all([
         axios.get(`/api/agreements/cycles/${cycleId}`),

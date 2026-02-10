@@ -9,7 +9,6 @@ import VideoVerifications from './VideoVerifications';
 import './AdminDashboard.css';
 
 function AdminDashboard() {
-  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('users');
 
   return (

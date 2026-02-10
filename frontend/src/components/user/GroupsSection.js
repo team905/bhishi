@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import MonthlyBiddingHistory from './MonthlyBiddingHistory';
 
 function GroupsSection({ groups }) {
-  const navigate = useNavigate();
   const STORAGE_KEY = 'bhishi_selected_group_id';
   
   // Initialize from localStorage if available
