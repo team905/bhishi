@@ -18,7 +18,14 @@ function NotificationsSection() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filter]);
+
+  useEffect(() => {
+    fetchNotifications();
+    // Poll for new notifications every 30 seconds
+    const interval = setInterval(fetchNotifications, 30000);
+    return () => clearInterval(interval);
+  }, [filter, fetchNotifications]);
 
   const markAsRead = async (notificationId) => {
     try {

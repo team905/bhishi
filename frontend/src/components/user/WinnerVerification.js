@@ -37,7 +37,11 @@ function WinnerVerification() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [cycleId]);
+
+  useEffect(() => {
+    fetchData();
+  }, [cycleId, fetchData]);
 
   const handleSignAgreement = async (e) => {
     e.preventDefault();

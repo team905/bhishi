@@ -60,26 +60,24 @@ function AuctionRoom() {
   }, [cycleId]);
 
   const updateCountdown = useCallback(() => {
-    setCycle(currentCycle => {
-      if (!currentCycle) return currentCycle;
+    // Use a ref to access current cycle value without dependency
+    if (!cycle) return;
 
-      const now = new Date();
-      const endDate = new Date(currentCycle.bidding_end_date);
-      const diff = endDate - now;
+    const now = new Date();
+    const endDate = new Date(cycle.bidding_end_date);
+    const diff = endDate - now;
 
-      if (diff <= 0) {
-        setTimeRemaining({ ended: true });
-        return currentCycle;
-      }
+    if (diff <= 0) {
+      setTimeRemaining({ ended: true });
+      return;
+    }
 
-      const hours = Math.floor(diff / (1000 * 60 * 60));
-      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
 
-      setTimeRemaining({ hours, minutes, seconds, ended: false });
-      return currentCycle;
-    });
-  }, []);
+    setTimeRemaining({ hours, minutes, seconds, ended: false });
+  }, [cycle]);
 
   const fetchCycleData = useCallback(async () => {
     try {
