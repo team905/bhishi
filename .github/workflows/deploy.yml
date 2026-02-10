@@ -27,9 +27,59 @@ jobs:
         run: gcloud auth configure-docker
       
       - name: Build container image
+        id: build
         run: |
           cd backend
-          gcloud builds submit --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/bhishi-backend .
+          # Submit build asynchronously to avoid log streaming permission issues
+          echo "Submitting build..."
+          BUILD_OUTPUT=$(gcloud builds submit --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/bhishi-backend . --async 2>&1)
+          echo "$BUILD_OUTPUT"
+          
+          # Extract build ID from output (look for URL pattern)
+          BUILD_ID=$(echo "$BUILD_OUTPUT" | grep -oE 'builds/[a-f0-9-]+' | head -1 | cut -d'/' -f2)
+          
+          # Fallback: get latest build if extraction failed
+          if [ -z "$BUILD_ID" ]; then
+            echo "Extracting build ID from recent builds..."
+            sleep 5  # Wait a moment for build to appear in list
+            BUILD_ID=$(gcloud builds list --limit=1 --format="value(id)" --sort-by=~createTime | head -1)
+          fi
+          
+          if [ -z "$BUILD_ID" ]; then
+            echo "❌ Could not determine build ID"
+            echo "Build output: $BUILD_OUTPUT"
+            exit 1
+          fi
+          
+          echo "BUILD_ID=$BUILD_ID" >> $GITHUB_OUTPUT
+          echo "Build ID: $BUILD_ID"
+          echo "View build: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=${{ secrets.GCP_PROJECT_ID }}"
+      
+      - name: Wait for build to complete
+        run: |
+          BUILD_ID="${{ steps.build.outputs.BUILD_ID }}"
+          
+          if [ -z "$BUILD_ID" ]; then
+            echo "❌ Build ID not found"
+            exit 1
+          fi
+          
+          echo "Waiting for build $BUILD_ID to complete (timeout: 10 minutes)..."
+          
+          # Wait for build with timeout (ignore errors from wait command)
+          gcloud builds wait $BUILD_ID --timeout=600 2>&1 || true
+          
+          # Always check final status
+          BUILD_STATUS=$(gcloud builds describe $BUILD_ID --format="value(status)" 2>/dev/null || echo "UNKNOWN")
+          echo "Final build status: $BUILD_STATUS"
+          
+          if [ "$BUILD_STATUS" != "SUCCESS" ]; then
+            echo "❌ Build failed with status: $BUILD_STATUS"
+            echo "View detailed logs: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=${{ secrets.GCP_PROJECT_ID }}"
+            exit 1
+          fi
+          
+          echo "✅ Build completed successfully!"
       
       - name: Create environment variables file
         run: |
