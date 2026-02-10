@@ -31,27 +31,34 @@ jobs:
         run: |
           cd backend
           # Submit build asynchronously to avoid log streaming permission issues
-          echo "Submitting build..."
+          echo "📦 Submitting build to Cloud Build..."
           BUILD_OUTPUT=$(gcloud builds submit --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/bhishi-backend . --async 2>&1)
           echo "$BUILD_OUTPUT"
           
-          # Extract build ID from output (look for URL pattern)
+          # Extract build ID from output (multiple patterns to handle different output formats)
           BUILD_ID=$(echo "$BUILD_OUTPUT" | grep -oE 'builds/[a-f0-9-]+' | head -1 | cut -d'/' -f2)
+          
+          # Alternative: extract from URL pattern
+          if [ -z "$BUILD_ID" ]; then
+            BUILD_ID=$(echo "$BUILD_OUTPUT" | grep -oE 'https://[^/]+/builds/[a-f0-9-]+' | grep -oE '[a-f0-9-]+$' | head -1)
+          fi
           
           # Fallback: get latest build if extraction failed
           if [ -z "$BUILD_ID" ]; then
-            echo "Extracting build ID from recent builds..."
-            sleep 5  # Wait a moment for build to appear in list
-            BUILD_ID=$(gcloud builds list --limit=1 --format="value(id)" --sort-by=~createTime | head -1)
+            echo "⚠️ Could not extract build ID from output, trying to get from build list..."
+            sleep 3  # Wait a moment for build to appear in list
+            BUILD_ID=$(gcloud builds list --limit=1 --format="value(id)" --sort-by=~createTime --filter="status=WORKING OR status=QUEUED" | head -1)
           fi
           
           if [ -z "$BUILD_ID" ]; then
             echo "❌ Could not determine build ID"
-            echo "Build output: $BUILD_OUTPUT"
+            echo "Build output:"
+            echo "$BUILD_OUTPUT"
             exit 1
           fi
           
           echo "BUILD_ID=$BUILD_ID" >> $GITHUB_OUTPUT
+          echo "✅ Build submitted successfully!"
           echo "Build ID: $BUILD_ID"
           echo "View build: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=${{ secrets.GCP_PROJECT_ID }}"
       
@@ -64,32 +71,98 @@ jobs:
             exit 1
           fi
           
-          echo "Waiting for build $BUILD_ID to complete (timeout: 10 minutes)..."
+          echo "⏳ Waiting for build $BUILD_ID to complete..."
+          echo "This may take 2-5 minutes..."
           
-          # Wait for build with timeout (ignore errors from wait command)
-          gcloud builds wait $BUILD_ID --timeout=600 2>&1 || true
+          # Poll build status every 10 seconds, timeout after 10 minutes (600 seconds)
+          MAX_ATTEMPTS=60
+          ATTEMPT=0
+          TIMEOUT=600
+          START_TIME=$(date +%s)
           
-          # Always check final status
-          BUILD_STATUS=$(gcloud builds describe $BUILD_ID --format="value(status)" 2>/dev/null || echo "UNKNOWN")
-          echo "Final build status: $BUILD_STATUS"
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            # Check elapsed time
+            ELAPSED=$(($(date +%s) - $START_TIME))
+            if [ $ELAPSED -ge $TIMEOUT ]; then
+              echo "❌ Build timeout after $TIMEOUT seconds"
+              exit 1
+            fi
+            
+            # Get build status
+            BUILD_STATUS=$(gcloud builds describe $BUILD_ID --format="value(status)" 2>/dev/null || echo "UNKNOWN")
+            
+            if [ -z "$BUILD_STATUS" ] || [ "$BUILD_STATUS" = "UNKNOWN" ]; then
+              echo "⚠️ Could not get build status, retrying..."
+              sleep 5
+              ATTEMPT=$((ATTEMPT + 1))
+              continue
+            fi
+            
+            echo "[$((ATTEMPT + 1))/$MAX_ATTEMPTS] Build status: $BUILD_STATUS (elapsed: ${ELAPSED}s)"
+            
+            # Check if build is complete
+            case "$BUILD_STATUS" in
+              "SUCCESS")
+                echo "✅ Build completed successfully!"
+                exit 0
+                ;;
+              "FAILURE"|"CANCELLED"|"EXPIRED"|"TIMEOUT")
+                echo "❌ Build failed with status: $BUILD_STATUS"
+                echo "View detailed logs: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=${{ secrets.GCP_PROJECT_ID }}"
+                exit 1
+                ;;
+              "WORKING"|"QUEUED"|"PENDING")
+                # Build is still in progress, wait and check again
+                sleep 10
+                ATTEMPT=$((ATTEMPT + 1))
+                ;;
+              *)
+                echo "⚠️ Unknown build status: $BUILD_STATUS, continuing to wait..."
+                sleep 10
+                ATTEMPT=$((ATTEMPT + 1))
+                ;;
+            esac
+          done
           
-          if [ "$BUILD_STATUS" != "SUCCESS" ]; then
-            echo "❌ Build failed with status: $BUILD_STATUS"
-            echo "View detailed logs: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=${{ secrets.GCP_PROJECT_ID }}"
-            exit 1
-          fi
-          
-          echo "✅ Build completed successfully!"
+          # If we exit the loop, we've timed out
+          FINAL_STATUS=$(gcloud builds describe $BUILD_ID --format="value(status)" 2>/dev/null || echo "UNKNOWN")
+          echo "❌ Build did not complete within timeout period"
+          echo "Final status: $FINAL_STATUS"
+          echo "View build: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=${{ secrets.GCP_PROJECT_ID }}"
+          exit 1
       
       - name: Create environment variables file
         run: |
+          # Validate required secrets are set
+          if [ -z "${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}" ]; then
+            echo "❌ FIREBASE_SERVICE_ACCOUNT_KEY secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.JWT_SECRET }}" ]; then
+            echo "❌ JWT_SECRET secret is not set"
+            exit 1
+          fi
+          
+          # Escape single quotes in secrets for YAML
+          FIREBASE_SA_KEY_ESCAPED=$(echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' | sed "s/'/''/g")
+          JWT_SECRET_ESCAPED=$(echo '${{ secrets.JWT_SECRET }}' | sed "s/'/''/g")
+          
+          # Create env vars file
           cat > /tmp/cloud-run-env-vars.yaml << EOF
-          FIREBASE_SERVICE_ACCOUNT_KEY: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}'
+          FIREBASE_SERVICE_ACCOUNT_KEY: '$FIREBASE_SA_KEY_ESCAPED'
           NODE_ENV: 'production'
           FIREBASE_USE_EMULATOR: 'false'
           FIREBASE_PROJECT_ID: '${{ secrets.GCP_PROJECT_ID }}'
-          JWT_SECRET: '${{ secrets.JWT_SECRET }}'
+          JWT_SECRET: '$JWT_SECRET_ESCAPED'
           EOF
+          
+          # Verify file was created
+          if [ ! -f /tmp/cloud-run-env-vars.yaml ]; then
+            echo "❌ Failed to create environment variables file"
+            exit 1
+          fi
+          
+          echo "✅ Environment variables file created"
       
       - name: Deploy to Cloud Run
         run: |
@@ -108,9 +181,26 @@ jobs:
       - name: Get backend URL
         id: backend-url
         run: |
-          URL=$(gcloud run services describe bhishi-backend --region us-central1 --format 'value(status.url)')
+          echo "🔗 Getting backend URL..."
+          URL=$(gcloud run services describe bhishi-backend --region us-central1 --format 'value(status.url)' 2>/dev/null)
+          
+          if [ -z "$URL" ]; then
+            echo "⚠️ Could not get backend URL, but deployment may have succeeded"
+            echo "Check Cloud Run console: https://console.cloud.google.com/run?project=${{ secrets.GCP_PROJECT_ID }}"
+            exit 0  # Don't fail the workflow, just warn
+          fi
+          
           echo "url=$URL" >> $GITHUB_OUTPUT
-          echo "Backend deployed at: $URL"
+          echo "✅ Backend deployed at: $URL"
+          
+          # Test health endpoint
+          echo "🏥 Testing health endpoint..."
+          sleep 5  # Wait a moment for service to be ready
+          if curl -f -s "$URL/api/health" > /dev/null; then
+            echo "✅ Health check passed!"
+          else
+            echo "⚠️ Health check failed, but service may still be starting up"
+          fi
 
   deploy-firestore:
     name: Deploy Firestore Indexes and Rules
