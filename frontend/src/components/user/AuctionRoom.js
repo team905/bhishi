@@ -19,31 +19,7 @@ function AuctionRoom() {
   const bidsEndRef = useRef(null);
   const pollIntervalRef = useRef(null);
 
-  useEffect(() => {
-    fetchCycleData();
-    
-    // Set up polling for live updates every 3 seconds
-    pollIntervalRef.current = setInterval(() => {
-      fetchBids();
-    }, 3000);
-
-    // Set up countdown timer
-    const timerInterval = setInterval(() => {
-      updateCountdown();
-    }, 1000);
-
-    return () => {
-      clearInterval(pollIntervalRef.current);
-      clearInterval(timerInterval);
-    };
-  }, [cycleId, fetchCycleData, fetchBids, updateCountdown]);
-
-  useEffect(() => {
-    if (bidsEndRef.current) {
-      bidsEndRef.current.scrollTop = bidsEndRef.current.scrollHeight;
-    }
-  }, [bids]);
-
+  // Define functions BEFORE useEffect to avoid "use before define" error
   const fetchBids = useCallback(async () => {
     try {
       const response = await axios.get(`/api/bidding/cycles/${cycleId}/bids`);
@@ -102,6 +78,31 @@ function AuctionRoom() {
       setLoading(false);
     }
   }, [cycleId, fetchBids, updateCountdown]);
+
+  useEffect(() => {
+    fetchCycleData();
+    
+    // Set up polling for live updates every 3 seconds
+    pollIntervalRef.current = setInterval(() => {
+      fetchBids();
+    }, 3000);
+
+    // Set up countdown timer
+    const timerInterval = setInterval(() => {
+      updateCountdown();
+    }, 1000);
+
+    return () => {
+      clearInterval(pollIntervalRef.current);
+      clearInterval(timerInterval);
+    };
+  }, [cycleId, fetchCycleData, fetchBids, updateCountdown]);
+
+  useEffect(() => {
+    if (bidsEndRef.current) {
+      bidsEndRef.current.scrollTop = bidsEndRef.current.scrollHeight;
+    }
+  }, [bids]);
 
   const handlePlaceBid = async (e) => {
     e.preventDefault();
